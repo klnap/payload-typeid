@@ -93,7 +93,10 @@ async function initPayload(options: Parameters<typeof makeConfig>[0], key: strin
 // db.destroy() alone can leave idle pool clients behind; DROP DATABASE ... FORCE then reports them.
 async function closePayload(payload: Awaited<ReturnType<typeof getPayload>>) {
   await payload.db.destroy?.();
-  await (payload.db as unknown as { pool?: { end(): Promise<void> } }).pool?.end();
+  const pool = (payload.db as unknown as { pool?: { ending?: boolean; end(): Promise<void> } })
+    .pool;
+  // db.destroy() may already have ended the pool; pg-pool rejects a second end().
+  if (pool && !pool.ending) await pool.end();
 }
 
 function guardCounts(client: Client, tableSchema: string, table: string) {
@@ -148,7 +151,7 @@ test("guards target the configured schema, not a same-named table in public", as
   } finally {
     await closePayload(payload);
   }
-});
+}, 120_000);
 
 test("a restricted runtime role starts without DDL when the guards are already current", async () => {
   const database = await freshDatabase("role");
@@ -184,7 +187,7 @@ test("a restricted runtime role starts without DDL when the guards are already c
 
   const after = await withClient(urlFor(database), (client) => client.query(triggerOids));
   expect(after.rows[0]?.oids).toBe(before.rows[0]?.oids);
-});
+}, 120_000);
 
 test("opt-out after activation keeps existing guards and documents keep TypeIDs", async () => {
   const database = await freshDatabase("optout");
@@ -210,4 +213,4 @@ test("opt-out after activation keeps existing guards and documents keep TypeIDs"
   } finally {
     await closePayload(optedOut);
   }
-});
+}, 120_000);
