@@ -134,7 +134,7 @@ jobs:
           void config;
           TYPES
             cat > "$FIXTURE/tsconfig.json" <<'TSCONFIG'
-          {"compilerOptions":{"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","strict":true,"skipLibCheck":true,"noEmit":true,"types":[]},"include":["consumer.mts"]}
+          {"compilerOptions":{"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","strict":true,"skipLibCheck":false,"noEmit":true,"types":[]},"include":["consumer.mts"]}
           TSCONFIG
             "$GITHUB_WORKSPACE/node_modules/.bin/tsc" --project "$FIXTURE/tsconfig.json"
             for ID_TYPE in default uuid; do
@@ -167,7 +167,7 @@ jobs:
           const dir = process.env.CONSUMER_DIR;
           fs.writeFileSync(`${dir}/consumer.mts`, `import { generateTypeId } from ${name};\nimport type { TypeID } from ${name};\nconst user: TypeID<"user"> = generateTypeId("user");\n// @ts-expect-error Distinct prefixes are not interchangeable.\nconst wrong: TypeID<"user"> = generateTypeId("product");\nvoid user;\nvoid wrong;\n`);
           fs.writeFileSync(`${dir}/consumer.mjs`, `import assert from "node:assert/strict";\nimport { generateTypeId, isTypeId, parseTypeId } from ${name};\nconst id = generateTypeId("user");\nassert.equal(parseTypeId(id).prefix, "user");\nassert.equal(isTypeId(id, "user"), true);\n`);
-          fs.writeFileSync(`${dir}/tsconfig.json`, JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true, noEmit: true, skipLibCheck: true, types: [] }, include: ["consumer.mts"] }));
+          fs.writeFileSync(`${dir}/tsconfig.json`, JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true, noEmit: true, skipLibCheck: false, types: [] }, include: ["consumer.mts"] }));
           NODE
           "$GITHUB_WORKSPACE/node_modules/.bin/tsc" --project "$CONSUMER_DIR/tsconfig.json"
           cd "$CONSUMER_DIR"
