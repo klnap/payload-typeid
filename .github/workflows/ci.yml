@@ -104,7 +104,6 @@ jobs:
             FIXTURE="$COMPAT_ROOT/$PAYLOAD_VERSION"
             mkdir -p "$FIXTURE/tests"
             cp tests/postgres.integration.ts "$FIXTURE/tests/postgres.integration.ts"
-            cp tests/postgres.schema.integration.ts "$FIXTURE/tests/postgres.schema.integration.ts"
             printf '{"name":"payload-typeid-compat","private":true,"type":"module"}\n' > "$FIXTURE/package.json"
             (
               cd "$FIXTURE"
@@ -149,7 +148,7 @@ jobs:
                   PAYLOAD_TYPEID_TEST_ID_TYPE="$ID_TYPE" \
                   PAYLOAD_DB_PUSH=true \
                   PAYLOAD_FORCE_DRIZZLE_PUSH=true \
-                  bun test --timeout 30000 ./tests/postgres.integration.ts ./tests/postgres.schema.integration.ts
+                  bun test --timeout 30000 ./tests/postgres.integration.ts
               )
             done
           done

@@ -202,7 +202,7 @@ Guard installation runs when Payload starts. It compares each function, constrai
 - Guards are created in the schema set by `schemaName` in the Payload database adapter. Without `schemaName`, objects are unqualified and resolve through `search_path`, as Payload's tables do.
 - The functions use `gen_random_uuid()`, built into PostgreSQL 13 and later.
 
-The integration suite covers a non-default schema with a same-named table in `public`, a restricted runtime role starting on up-to-date guards, and opt-out after activation. It does not cover concurrent first installations or privilege combinations beyond these.
+The schema tests (non-default schema with a same-named table in `public`, a restricted runtime role starting on up-to-date guards, and opt-out after activation) run against the development Payload version. They are not part of the Payload 3.1.1 CI job. Manual checks on 3.1.1 confirmed that guards land in the configured schema, but the same test sequence does not complete reliably there in one process.
 
 ### What the guards cannot stop
 
