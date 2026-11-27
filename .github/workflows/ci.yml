@@ -17,6 +17,18 @@ jobs:
   verify:
     name: verify
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     permissions:
       contents: read
       pull-requests: read
@@ -33,7 +45,7 @@ jobs:
           persist-credentials: false
 
       - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
-        if: github.event_name == 'pull_request' && github.event.repository.private == false
+        if: github.event_name == 'pull_request'
         with:
           fail-on-severity: high
 
@@ -75,6 +87,72 @@ jobs:
           console.log(files.join("\n"));
           NODE
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.1
+          package-manager-cache: false
+
+      - name: Test Payload and PostgreSQL compatibility boundaries
+        env:
+          TARBALL: ${{ steps.pack.outputs.path }}
+          COMPAT_ROOT: ${{ runner.temp }}/payload-compatibility
+        run: |
+          set -euo pipefail
+          LATEST="$(node -p 'require("./package.json").devDependencies.payload')"
+          for PAYLOAD_VERSION in 3.1.1 3.68.4 3.71.0 "$LATEST"; do
+            VERSION_KEY="${PAYLOAD_VERSION//./_}"
+            FIXTURE="$COMPAT_ROOT/$PAYLOAD_VERSION"
+            mkdir -p "$FIXTURE/tests"
+            cp tests/postgres.integration.ts "$FIXTURE/tests/postgres.integration.ts"
+            printf '{"name":"payload-typeid-compat","private":true,"type":"module"}\n' > "$FIXTURE/package.json"
+            (
+              cd "$FIXTURE"
+              bun add "$TARBALL" "payload@$PAYLOAD_VERSION" "@payloadcms/db-postgres@$PAYLOAD_VERSION"
+            )
+            cat > "$FIXTURE/consumer.mts" <<'TYPES'
+          import { postgresAdapter } from "@payloadcms/db-postgres";
+          import { buildConfig, type CollectionConfig, type GlobalConfig, type Plugin } from "payload";
+          import { generateTypeId, type TypeID, typeId } from "@klnap/payload-typeid";
+
+          const articleID: TypeID<"article"> = generateTypeId("article");
+          // @ts-expect-error Different prefixes are not interchangeable.
+          const categoryID: TypeID<"article"> = generateTypeId("category");
+          const articles: CollectionConfig = { slug: "articles", custom: { typeid: "article" }, fields: [] };
+          const users: CollectionConfig = { slug: "users", custom: { typeid: false }, fields: [] };
+          const settings: GlobalConfig = { slug: "site-settings", custom: { typeid: false }, fields: [] };
+          const plugin: Plugin = typeId({ collections: { articles: "post", users: "user" } });
+          const config = buildConfig({
+            secret: "compatibility-test-secret",
+            db: postgresAdapter({ pool: { connectionString: "postgres://localhost/payload" }, idType: "uuid" }),
+            collections: [articles, users],
+            globals: [settings],
+            plugins: [plugin],
+          });
+          void articleID;
+          void categoryID;
+          void settings;
+          void config;
+          TYPES
+            cat > "$FIXTURE/tsconfig.json" <<'TSCONFIG'
+          {"compilerOptions":{"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","strict":true,"skipLibCheck":true,"noEmit":true,"types":[]},"include":["consumer.mts"]}
+          TSCONFIG
+            "$GITHUB_WORKSPACE/node_modules/.bin/tsc" --project "$FIXTURE/tsconfig.json"
+            for ID_TYPE in default uuid; do
+              DATABASE="payload_typeid_${VERSION_KEY}_${ID_TYPE}"
+              psql "postgres://postgres@127.0.0.1:5432/postgres" \
+                -v ON_ERROR_STOP=1 \
+                -c "CREATE DATABASE \"$DATABASE\""
+              (
+                cd "$FIXTURE"
+                PAYLOAD_TYPEID_TEST_DATABASE_URL="postgres://postgres@127.0.0.1:5432/$DATABASE" \
+                  PAYLOAD_TYPEID_TEST_ID_TYPE="$ID_TYPE" \
+                  PAYLOAD_DB_PUSH=true \
+                  PAYLOAD_FORCE_DRIZZLE_PUSH=true \
+                  bun test --timeout 30000 ./tests/postgres.integration.ts
+              )
+            done
+          done
+
       - name: Install tarball in an isolated consumer
         env:
           TARBALL: ${{ steps.pack.outputs.path }}
@@ -87,9 +165,9 @@ jobs:
           const fs = require("node:fs");
           const name = JSON.stringify(process.env.PACKAGE_NAME);
           const dir = process.env.CONSUMER_DIR;
-          fs.writeFileSync(`${dir}/consumer.mts`, `import { greet } from ${name};\nconst result: string = greet("Ada");\n// @ts-expect-error Names must be strings.\ngreet(42);\nvoid result;\n`);
-          fs.writeFileSync(`${dir}/consumer.mjs`, `import assert from "node:assert/strict";\nimport { greet } from ${name};\nassert.equal(greet("Ada"), "Hello, Ada!");\n`);
-          fs.writeFileSync(`${dir}/tsconfig.json`, JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true, noEmit: true, skipLibCheck: false, types: [] }, include: ["consumer.mts"] }));
+          fs.writeFileSync(`${dir}/consumer.mts`, `import { generateTypeId } from ${name};\nimport type { TypeID } from ${name};\nconst user: TypeID<"user"> = generateTypeId("user");\n// @ts-expect-error Distinct prefixes are not interchangeable.\nconst wrong: TypeID<"user"> = generateTypeId("product");\nvoid user;\nvoid wrong;\n`);
+          fs.writeFileSync(`${dir}/consumer.mjs`, `import assert from "node:assert/strict";\nimport { generateTypeId, isTypeId, parseTypeId } from ${name};\nconst id = generateTypeId("user");\nassert.equal(parseTypeId(id).prefix, "user");\nassert.equal(isTypeId(id, "user"), true);\n`);
+          fs.writeFileSync(`${dir}/tsconfig.json`, JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true, noEmit: true, skipLibCheck: true, types: [] }, include: ["consumer.mts"] }));
           NODE
           "$GITHUB_WORKSPACE/node_modules/.bin/tsc" --project "$CONSUMER_DIR/tsconfig.json"
           cd "$CONSUMER_DIR"
