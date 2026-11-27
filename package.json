@@ -56,7 +56,7 @@
     "prepublishOnly": "node -e \"if (require('./package.json').private) throw new Error('This package is private and cannot be published')\"",
     "changeset": "changeset",
     "changeset:version": "changeset version",
-    "changeset:version-check": "bun run changeset:version && bun run check"
+    "changeset:version-check": "bun run changeset:version && bunx biome format --write CHANGELOG.md && bun run check"
   },
   "peerDependencies": {
     "payload": "^3.1.1"
