@@ -8,6 +8,7 @@ import {
   isTypeId,
   parseTypeId,
   type TypeID,
+  type TypeIdOptions,
   toUUID,
   typeId,
 } from "../src/index.js";
@@ -107,200 +108,341 @@ test("generates distinct IDs within the same millisecond", () => {
   expect(timestamps.size).toBe(1);
 });
 
-test("normalizes and applies overrides without mutating config", async () => {
-  const original = {
-    collections: [
-      { slug: "users", fields: [] },
-      { slug: "product-variants", fields: [] },
-      { slug: "APIKeys", fields: [] },
-      { slug: "audit-logs", fields: [] },
-    ],
-    plugins: [],
-  } as unknown as Config;
-  const options = {
-    collections: {
-      users: "user",
-      "audit-logs": false,
-    },
-  } as const;
-  const result = (await typeId(options)(original)) as Config;
+type TestCollection = { slug: string; fields: Field[]; custom?: Record<string, unknown> };
+const runPlugin = (
+  collections: TestCollection[],
+  options?: TypeIdOptions,
+  globals: object[] = [],
+): Config => typeId(options)({ collections, globals, plugins: [] } as unknown as Config) as Config;
+const idField = (fields: Field[]) =>
+  fields.find((field) => "name" in field && field.name === "id") as
+    | (Field & { defaultValue: () => string })
+    | undefined;
+const managedPrefix = (collection: { fields: Field[] } | undefined): string | false => {
+  const field = collection && idField(collection.fields);
+  if (!field || typeof field.defaultValue !== "function") return false;
+  return parseTypeId(field.defaultValue()).prefix;
+};
 
-  expect(result).not.toBe(original);
-  expect(original.collections?.[0]?.fields).toHaveLength(0);
-  expect(
-    result.collections?.map((collection) => {
-      const field = collection.fields.find(
-        (candidate) => "name" in candidate && candidate.name === "id",
-      );
-      return field && "name" in field ? field.name : null;
-    }),
-  ).toEqual(["id", "id", "id", null]);
-  for (const [index, prefix] of ["user", "product_variants", "api_keys"].entries()) {
-    const field = result.collections?.[index]?.fields.find(
-      (candidate) => "name" in candidate && candidate.name === "id",
+test("typeId() without opted-in collections leaves every collection unchanged", () => {
+  const collections = [
+    { slug: "articles", fields: [] },
+    { slug: "users", fields: [] },
+  ];
+  const result = runPlugin(collections, undefined);
+  const emptyCentral = runPlugin(collections, { collections: {} });
+
+  for (const config of [result, emptyCentral]) {
+    expect(config.collections?.map((collection) => idField(collection.fields))).toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect(config.collections?.every(({ fields }) => fields.length === 0)).toBe(true);
+  }
+});
+
+test("collections are managed only through model or central opt-in", () => {
+  const result = runPlugin(
+    [
+      { slug: "articles", custom: { typeId: true }, fields: [] },
+      { slug: "authors", fields: [] },
+      { slug: "categories", fields: [] },
+      { slug: "pages", fields: [] },
+    ],
+    { collections: { categories: true, pages: false } },
+  );
+
+  expect(result.collections?.map((collection) => managedPrefix(collection))).toEqual([
+    "article",
+    false,
+    "category",
+    false,
+  ]);
+});
+
+test("unmanaged collections introduced by other plugins keep their ID strategy", () => {
+  const introducedByPlugin = {
+    slug: "plugin-documents",
+    fields: [{ name: "title", type: "text" }] as unknown as Field[],
+  };
+  const result = runPlugin([
+    introducedByPlugin,
+    { slug: "notes", custom: { typeId: true }, fields: [] },
+  ]);
+
+  expect(result.collections?.[0]).toBe(introducedByPlugin);
+  expect(managedPrefix(result.collections?.[1])).toBe("note");
+});
+
+test("resolves every model and central combination before validation", () => {
+  const cases: Array<[boolean | string | undefined, boolean | string | undefined, string | false]> =
+    [
+      [undefined, undefined, false],
+      [true, undefined, "article"],
+      ["post", undefined, "post"],
+      [false, undefined, false],
+      [undefined, true, "article"],
+      [undefined, "article", "article"],
+      [false, true, "article"],
+      [false, "article", "article"],
+      [true, false, false],
+      ["post", "article", "article"],
+      ["post", true, "article"],
+      [true, "article", "article"],
+    ];
+  for (const [central, model, expected] of cases) {
+    const result = runPlugin(
+      [{ slug: "articles", custom: model === undefined ? {} : { typeId: model }, fields: [] }],
+      central === undefined ? undefined : { collections: { articles: central } },
     );
-    if (!field || !("defaultValue" in field) || typeof field.defaultValue !== "function") {
-      throw new Error(`Expected TypeID field for collection index ${index}.`);
-    }
-    expect(parseTypeId(field.defaultValue({} as never)).prefix).toBe(prefix);
+    expect({ central, model, prefix: managedPrefix(result.collections?.[0]) }).toEqual({
+      central,
+      model,
+      prefix: expected,
+    });
   }
-  expect(options.collections).toEqual({ users: "user", "audit-logs": false });
-  expect(typeId().order).toBe(Number.MAX_SAFE_INTEGER);
 });
 
-test("model-level settings override central collection options", async () => {
-  const result = (await typeId({
-    collections: {
-      articles: "post",
-      authors: "writer",
-      users: false,
-    },
-  })({
-    collections: [
-      { slug: "articles", custom: { typeid: "article" }, fields: [] },
-      { slug: "authors", custom: { typeid: false }, fields: [] },
-      { slug: "users", custom: { typeid: "account" }, fields: [] },
-    ],
-    plugins: [],
-  } as unknown as Config)) as Config;
+test("explicit model false overrides a central prefix and preserves custom data", () => {
+  const custom = { typeId: false, tracking: "editorial" };
+  const collection = { slug: "articles", custom, fields: [] };
+  const result = runPlugin([collection], { collections: { articles: "post" } });
 
-  const prefixes = result.collections?.map((collection) => {
-    const id = collection.fields.find((field) => "name" in field && field.name === "id");
-    return id && "defaultValue" in id && typeof id.defaultValue === "function"
-      ? parseTypeId(id.defaultValue({} as never)).prefix
-      : false;
-  });
-
-  expect(prefixes).toEqual(["article", false, "account"]);
-});
-
-test("uses normalized slugs when model and central settings are absent", async () => {
-  const result = (await typeId()({
-    collections: [
-      { slug: "articles", fields: [] },
-      { slug: "article-categories", fields: [] },
-    ],
-    plugins: [],
-  } as unknown as Config)) as Config;
-  const prefixes = result.collections?.map((collection) => {
-    const id = collection.fields[0];
-    if (!id || !("defaultValue" in id) || typeof id.defaultValue !== "function") {
-      throw new Error("Expected the default TypeID field.");
-    }
-    return parseTypeId(id.defaultValue({} as never)).prefix;
-  });
-
-  expect(prefixes).toEqual(["articles", "article_categories"]);
-});
-
-test("uses local settings without central options and preserves collection custom data", async () => {
-  const custom = { typeid: "article", tracking: "editorial" };
-  const result = (await typeId()({
-    collections: [
-      { slug: "articles", custom, fields: [] },
-      { slug: "authors", custom: { typeid: false, tracking: "editorial" }, fields: [] },
-    ],
-    plugins: [],
-  } as unknown as Config)) as Config;
-  const articleID = result.collections?.[0]?.fields[0];
-
-  expect(
-    articleID && "defaultValue" in articleID && typeof articleID.defaultValue === "function",
-  ).toBe(true);
-  if (
-    !articleID ||
-    !("defaultValue" in articleID) ||
-    typeof articleID.defaultValue !== "function"
-  ) {
-    throw new Error("Expected the article TypeID field.");
-  }
-  expect(parseTypeId(articleID.defaultValue({} as never)).prefix).toBe("article");
+  expect(result.collections?.[0]).toBe(collection);
   expect(result.collections?.[0]?.custom).toBe(custom);
-  expect(result.collections?.[1]?.fields).toHaveLength(0);
-  expect(result.collections?.[1]?.custom).toEqual({ typeid: false, tracking: "editorial" });
 });
 
-test("inherits central settings when model typeid is undefined", async () => {
-  const result = (await typeId({ collections: { articles: "post", authors: false } })({
-    collections: [
-      { slug: "articles", custom: { typeid: undefined, tracking: "editorial" }, fields: [] },
-      { slug: "authors", custom: { typeid: undefined }, fields: [] },
+test("no false collisions from shadowed central settings", () => {
+  const result = runPlugin(
+    [
+      { slug: "articles", custom: { typeId: "article" }, fields: [] },
+      { slug: "authors", custom: { typeId: false }, fields: [] },
+      { slug: "categories", custom: { typeId: "category" }, fields: [] },
     ],
-    plugins: [],
-  } as unknown as Config)) as Config;
-  const articleID = result.collections?.[0]?.fields[0];
+    { collections: { articles: "shared", authors: "shared", categories: "shared" } },
+  );
 
-  if (
-    !articleID ||
-    !("defaultValue" in articleID) ||
-    typeof articleID.defaultValue !== "function"
-  ) {
-    throw new Error("Expected the inherited article TypeID field.");
-  }
-  expect(parseTypeId(articleID.defaultValue({} as never)).prefix).toBe("post");
-  expect(result.collections?.[1]?.fields).toHaveLength(0);
-});
-
-test("checks prefix collisions only after resolving model precedence", async () => {
-  const result = (await typeId({
-    collections: { articles: "shared", authors: "shared", categories: "shared" },
-  })({
-    collections: [
-      { slug: "articles", custom: { typeid: "article" }, fields: [] },
-      { slug: "authors", custom: { typeid: false }, fields: [] },
-      { slug: "categories", custom: { typeid: "category" }, fields: [] },
-    ],
-    plugins: [],
-  } as unknown as Config)) as Config;
-
-  expect(result.collections?.map(({ fields }) => fields.length)).toEqual([1, 0, 1]);
+  expect(result.collections?.map((collection) => managedPrefix(collection))).toEqual([
+    "article",
+    false,
+    "category",
+  ]);
   expect(() =>
-    typeId()({
-      collections: [
-        { slug: "articles", custom: { typeid: "shared" }, fields: [] },
-        { slug: "authors", custom: { typeid: "shared" }, fields: [] },
+    runPlugin(
+      [
+        { slug: "articles", fields: [] },
+        { slug: "authors", fields: [] },
       ],
-      plugins: [],
-    } as unknown as Config),
+      { collections: { articles: "same", authors: "same" } },
+    ),
   ).toThrow(/duplicate TypeID prefix/);
 });
 
-test("rejects invalid model prefixes and unsupported Global prefixes", async () => {
-  expect(() =>
-    typeId()({
-      collections: [{ slug: "articles", custom: { typeid: "Article" }, fields: [] }],
-      plugins: [],
-    } as unknown as Config),
-  ).toThrow(/Invalid TypeID prefix/);
-  expect(() =>
-    typeId()({
-      collections: [{ slug: "articles", custom: { typeid: 42 }, fields: [] }],
-      plugins: [],
-    } as unknown as Config),
-  ).toThrow(/custom\.typeid must be a prefix string, false, or undefined/);
-  expect(() =>
-    typeId()({
-      collections: [],
-      globals: [{ slug: "site-settings", custom: { typeid: "settings" }, fields: [] }],
-      plugins: [],
-    } as unknown as Config),
-  ).toThrow(/Globals do not expose configurable document IDs/);
+test("derives singular prefixes from slugs only", () => {
+  const cases: Array<[string, string]> = [
+    ["articles", "article"],
+    ["authors", "author"],
+    ["categories", "category"],
+    ["pages", "page"],
+    ["projects", "project"],
+    ["article-authors", "article_author"],
+    ["ArticleAuthors", "article_author"],
+    ["Article_Tags", "article_tag"],
+    ["audit-logs", "audit_log"],
+    ["staff-members", "staff_member"],
+    ["people", "person"],
+    ["criteria", "criterion"],
+    ["faqs", "faq"],
+    ["news", "news"],
+    ["status", "status"],
+    ["sheep", "sheep"],
+    ["my_page", "my_page"],
+    ["x", "x"],
+    ["data", "datum"],
+  ];
+  for (const [slug, prefix] of cases) {
+    const first = managedPrefix(
+      runPlugin([{ slug, custom: { typeId: true }, fields: [] }]).collections?.[0],
+    );
+    const second = managedPrefix(
+      runPlugin([{ slug, custom: { typeId: true }, fields: [] }]).collections?.[0],
+    );
+    expect({ slug, prefix: first }).toEqual({ slug, prefix });
+    expect(second).toBe(first);
+  }
+});
 
-  const global = {
-    slug: "site-settings",
-    custom: { typeid: false, tracking: "editorial" },
-    fields: [],
-  };
-  const result = await typeId()({
-    collections: [],
-    globals: [global],
-    plugins: [],
-  } as unknown as Config);
-  expect(result.globals?.[0]).toBe(global);
+test("ignores labels, GraphQL names, and database names when deriving prefixes", () => {
+  const result = runPlugin([
+    {
+      slug: "articles",
+      custom: { typeId: true },
+      labels: { singular: "Story", plural: "Stories" },
+      graphQL: { singularName: "Story" },
+      dbName: "stories",
+      fields: [],
+    } as TestCollection,
+  ]);
+
+  expect(managedPrefix(result.collections?.[0])).toBe("article");
+});
+
+test("rejects slugs that cannot derive a valid prefix and recommends an override", () => {
+  for (const slug of [
+    "APIKeys",
+    "HTMLPages",
+    "a-b",
+    "café-menus",
+    "users-2fa",
+    "uploads-v2",
+    "FAQs",
+    "email/templates",
+  ]) {
+    expect(() => runPlugin([{ slug, custom: { typeId: true }, fields: [] }])).toThrow(
+      new RegExp(
+        `Collection "${slug.replace(/[/.+*?^${}()|[\]\\]/g, "\\$&")}" cannot derive a TypeID prefix`,
+      ),
+    );
+    expect(() => runPlugin([{ slug, fields: [] }], { collections: { [slug]: true } })).toThrow(
+      /explicit prefix string/,
+    );
+    expect(
+      managedPrefix(
+        runPlugin([{ slug, fields: [] }], { collections: { [slug]: "custom" } }).collections?.[0],
+      ),
+    ).toBe("custom");
+  }
+});
+
+test("uses explicit overrides for undesirable derived prefixes and collisions", () => {
+  const result = runPlugin(
+    [
+      { slug: "articles", custom: { typeId: true }, fields: [] },
+      { slug: "article", fields: [] },
+      { slug: "data", fields: [] },
+    ],
+    { collections: { article: "story", data: "record" } },
+  );
+
+  expect(result.collections?.map((collection) => managedPrefix(collection))).toEqual([
+    "article",
+    "story",
+    "record",
+  ]);
+  expect(() =>
+    runPlugin([
+      { slug: "articles", custom: { typeId: true }, fields: [] },
+      { slug: "article", custom: { typeId: true }, fields: [] },
+    ]),
+  ).toThrow(/"articles" and "article" resolve to duplicate TypeID prefix "article"/);
+});
+
+test("validates explicit prefixes exactly without singularizing or normalizing them", () => {
+  expect(
+    managedPrefix(
+      runPlugin([{ slug: "articles", custom: { typeId: "editorial_articles" }, fields: [] }])
+        .collections?.[0],
+    ),
+  ).toBe("editorial_articles");
+  expect(
+    managedPrefix(
+      runPlugin([{ slug: "articles", custom: { typeId: "a".repeat(63) }, fields: [] }])
+        .collections?.[0],
+    ),
+  ).toBe("a".repeat(63));
+  for (const prefix of [
+    "",
+    "Article",
+    "article-x",
+    "_article",
+    "article_",
+    "1article",
+    "a".repeat(64),
+    "é",
+  ]) {
+    expect(() => runPlugin([{ slug: "articles", custom: { typeId: prefix }, fields: [] }])).toThrow(
+      /Invalid TypeID prefix|empty TypeID prefix/,
+    );
+  }
+});
+
+test("rejects invalid setting types with actionable messages", () => {
+  expect(() => runPlugin([{ slug: "articles", custom: { typeId: 42 }, fields: [] }])).toThrow(
+    /custom\.typeId must be true, false, a prefix string, or undefined/,
+  );
+  expect(() =>
+    runPlugin([{ slug: "articles", fields: [] }], {
+      collections: { articles: 42 as unknown as string },
+    }),
+  ).toThrow(/must be true, false, or a prefix string/);
+  expect(() =>
+    runPlugin([{ slug: "articles", fields: [] }], { collections: null as never }),
+  ).toThrow(/record of collection slugs/);
+});
+
+test("rejects unknown central collections even when a model setting shadows them", () => {
+  expect(() =>
+    runPlugin([{ slug: "articles", custom: { typeId: "article" }, fields: [] }], {
+      collections: { articles: "post", unknown: true },
+    }),
+  ).toThrow(/unknown collection "unknown"/);
+});
+
+test("does not validate central prefixes shadowed by model settings", () => {
+  const result = runPlugin([{ slug: "articles", custom: { typeId: "article" }, fields: [] }], {
+    collections: { articles: "Not Valid" },
+  });
+
+  expect(managedPrefix(result.collections?.[0])).toBe("article");
+});
+
+test("rejects the obsolete custom.typeid spelling on collections and globals", () => {
+  expect(() =>
+    runPlugin([{ slug: "articles", custom: { typeid: "article" }, fields: [] }]),
+  ).toThrow(/obsolete custom\.typeid key; rename it to custom\.typeId/);
+  expect(() => runPlugin([{ slug: "users", custom: { typeid: false }, fields: [] }])).toThrow(
+    /obsolete custom\.typeid key/,
+  );
+  expect(() =>
+    runPlugin([], undefined, [{ slug: "site-settings", custom: { typeid: false }, fields: [] }]),
+  ).toThrow(/obsolete custom\.typeid key/);
+});
+
+test("preserves unrelated custom properties", () => {
+  const custom = { typeId: "article", tracking: "editorial" };
+  const unmanagedCustom = { tracking: "editorial" };
+  const result = runPlugin([
+    { slug: "articles", custom, fields: [] },
+    { slug: "authors", custom: unmanagedCustom, fields: [] },
+  ]);
+
+  expect(managedPrefix(result.collections?.[0])).toBe("article");
+  expect(result.collections?.[0]?.custom).toBe(custom);
+  expect(result.collections?.[1]?.custom).toBe(unmanagedCustom);
+  expect(result.collections?.[1]?.fields).toHaveLength(0);
+});
+
+test("handles Globals without configurable IDs", () => {
+  const omitted = { slug: "site-settings", fields: [] };
+  const disabled = { slug: "footer", custom: { typeId: false }, fields: [] };
+  const result = runPlugin([], undefined, [omitted, disabled]);
+
+  expect(result.globals?.[0]).toBe(omitted);
+  expect(result.globals?.[1]).toBe(disabled);
+  expect(() =>
+    runPlugin([], undefined, [{ slug: "site-settings", custom: { typeId: true }, fields: [] }]),
+  ).toThrow(/cannot use custom\.typeId true/);
+  expect(() =>
+    runPlugin([], undefined, [
+      { slug: "site-settings", custom: { typeId: "settings" }, fields: [] },
+    ]),
+  ).toThrow(/cannot use custom\.typeId "settings"/);
+  expect(() =>
+    runPlugin([], undefined, [{ slug: "site-settings", custom: { typeId: 42 }, fields: [] }]),
+  ).toThrow(/Invalid TypeID configuration for Global "site-settings"/);
 });
 
 test("rejects invalid prefixes, unknown collections, duplicate prefixes, and collection IDs", () => {
-  expect(() => typeId()(config(["user2"]))).toThrow(/collections\["user2"\] override/);
   expect(() => typeId({ collections: { users: "Bad" } })(config(["users"]))).toThrow(
     /Invalid TypeID prefix/,
   );
@@ -310,9 +452,9 @@ test("rejects invalid prefixes, unknown collections, duplicate prefixes, and col
   expect(() =>
     typeId({ collections: { users: "same", products: "same" } })(config(["users", "products"])),
   ).toThrow(/duplicate TypeID prefix/);
-  expect(() => typeId()(config(["users"], [{ name: "id", type: "text" }]))).toThrow(
-    /collection-level field named "id"/,
-  );
+  expect(() =>
+    typeId({ collections: { users: true } })(config(["users"], [{ name: "id", type: "text" }])),
+  ).toThrow(/collection-level field named "id"/);
 });
 
 test("detects collection-level IDs inside flattened Payload layouts", () => {
@@ -325,9 +467,9 @@ test("detects collection-level IDs inside flattened Payload layouts", () => {
   ] as unknown as Field[];
 
   for (const field of layouts) {
-    expect(() => typeId()(config(["documents"], [field]))).toThrow(
-      /collection-level field named "id"/,
-    );
+    expect(() =>
+      typeId({ collections: { documents: true } })(config(["documents"], [field])),
+    ).toThrow(/collection-level field named "id"/);
   }
 });
 
@@ -345,7 +487,9 @@ test("allows nested fields named id and adds exactly one collection ID", async (
       tabs: [{ label: "Details", name: "details", fields: [{ name: "id", type: "text" }] }],
     },
   ] as unknown as Field[];
-  const result = (await typeId()(config(["documents"], fields))) as Config;
+  const result = (await typeId({ collections: { documents: true } })(
+    config(["documents"], fields),
+  )) as Config;
   const collectionFields = result.collections?.[0]?.fields;
   if (!collectionFields) throw new Error("Expected configured collection fields.");
 
@@ -363,7 +507,7 @@ test("accepts PostgreSQL collections with arrays and blocks and prepends the ID"
     { name: "body", type: "blocks", blocks: [{ slug: "copy", fields: [] }] },
   ] as unknown as Field[];
   const original = {
-    collections: [{ slug: "projects", fields }],
+    collections: [{ slug: "projects", custom: { typeId: true }, fields }],
     db: { name: "postgres" },
     plugins: [],
   } as unknown as Config;
@@ -371,6 +515,39 @@ test("accepts PostgreSQL collections with arrays and blocks and prepends the ID"
 
   expect(result.collections?.[0]?.fields[0]).toMatchObject({ name: "id", type: "text" });
   expect(result.collections?.[0]?.fields.slice(1)).toEqual(fields);
+});
+
+test("normalizes and applies overrides without mutating config", async () => {
+  const original = {
+    collections: [
+      { slug: "users", custom: { typeId: true }, fields: [] },
+      { slug: "product-variants", fields: [] },
+      { slug: "audit-logs", fields: [] },
+    ],
+    plugins: [],
+  } as unknown as Config;
+  const options = {
+    collections: {
+      users: "user",
+      "product-variants": true,
+      "audit-logs": false,
+    },
+  } as const;
+  const result = (await typeId(options)(original)) as Config;
+
+  expect(result).not.toBe(original);
+  expect(original.collections?.[0]?.fields).toHaveLength(0);
+  expect(result.collections?.map((collection) => managedPrefix(collection))).toEqual([
+    "user",
+    "product_variant",
+    false,
+  ]);
+  expect(options.collections).toEqual({
+    users: "user",
+    "product-variants": true,
+    "audit-logs": false,
+  });
+  expect(typeId().order).toBe(Number.MAX_SAFE_INTEGER);
 });
 
 test("rejects supplied IDs for creates and updates, even with access overrides", async () => {
