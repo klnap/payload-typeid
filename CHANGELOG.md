@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+### Patch Changes
+
+- da89ab8: Revise the README: lead with a realistic quick example, state precedence and Globals behavior precisely, separate database guarantees, and document startup requirements and existing-database migration.
+
 ## 0.3.1
 
 ### Patch Changes
