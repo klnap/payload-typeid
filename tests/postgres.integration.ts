@@ -45,12 +45,16 @@ const config = await buildConfig({
     {
       slug: "users",
       auth: true,
-      custom: { typeid: false, integrationMetadata: "preserved" },
+      custom: { typeId: false, integrationMetadata: "preserved" },
       fields: [{ name: "name", type: "text" }],
     },
     {
+      slug: "notes",
+      fields: [{ name: "body", type: "text" }],
+    },
+    {
       slug: "authors",
-      custom: { typeid: "author" },
+      custom: { typeId: "author" },
       fields: [{ name: "name", type: "text" }],
     },
     {
@@ -64,7 +68,7 @@ const config = await buildConfig({
     },
     {
       slug: "articles",
-      custom: { typeid: "article", integrationMetadata: "preserved" },
+      custom: { typeId: "article", integrationMetadata: "preserved" },
       access: { create: () => false },
       versions: { drafts: { autosave: true }, maxPerDoc: 20 },
       fields: [
@@ -113,7 +117,7 @@ const config = await buildConfig({
   globals: [
     {
       slug: "site-settings",
-      custom: { typeid: false },
+      custom: { typeId: false },
       fields: [{ name: "cards", type: "array", fields: [{ name: "label", type: "text" }] }],
     },
   ],
@@ -123,8 +127,9 @@ const config = await buildConfig({
       collections: {
         articles: false,
         authors: "writer",
-        categories: "category",
+        categories: true,
         media: false,
+        "plugin-documents": "document",
         users: "user",
       },
     }),
@@ -152,6 +157,7 @@ test("uses native TypeIDs with Payload and PostgreSQL adapter ID types", async (
   expect(payload.collections["plugin-documents"].customIDType).toBe("text");
   expect(payload.collections.users.customIDType).toBeUndefined();
   expect(payload.collections.media.customIDType).toBeUndefined();
+  expect(payload.collections.notes.customIDType).toBeUndefined();
   expect(payload.db.defaultIDType).toBe(postgresIDType === "uuid" ? "text" : "number");
   expect(
     payload.collections.articles.config.fields.filter(
@@ -159,7 +165,7 @@ test("uses native TypeIDs with Payload and PostgreSQL adapter ID types", async (
     ),
   ).toHaveLength(1);
   expect(payload.config.collections.find(({ slug }) => slug === "articles")?.custom).toEqual({
-    typeid: "article",
+    typeId: "article",
     integrationMetadata: "preserved",
   });
 
@@ -183,6 +189,19 @@ test("uses native TypeIDs with Payload and PostgreSQL adapter ID types", async (
   expect(isTypeId(author.id, "author")).toBe(true);
   expect(isTypeId(media.id, "media")).toBe(false);
   expect(isTypeId(category.id, "category")).toBe(true);
+
+  const pluginDocument = await payload.create({
+    collection: "plugin-documents",
+    data: { title: "Plugin-owned document" },
+    overrideAccess: true,
+  });
+  const note = await payload.create({
+    collection: "notes",
+    data: { body: "Unspecified collection" },
+    overrideAccess: true,
+  });
+  expect(isTypeId(pluginDocument.id, "document")).toBe(true);
+  expect(isTypeId(note.id)).toBe(false);
 
   const article = await payload.create({
     collection: "articles",

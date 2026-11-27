@@ -5,6 +5,7 @@ import {
   type Config,
   type Field,
   flattenAllFields,
+  formatLabels,
   type Plugin,
 } from "payload";
 
@@ -15,7 +16,7 @@ export type TypeID<Prefix extends string = string> = string extends Prefix
     : `${Prefix}_${string}`;
 
 export interface TypeIdOptions {
-  collections?: Record<string, string | false>;
+  collections?: Record<string, boolean | string>;
 }
 
 interface ParsedTypeID<Prefix extends string = string> {
@@ -130,12 +131,21 @@ export function generateTypeId<const Prefix extends string>(prefix: Prefix): Typ
   return fromUUID(prefix, uuidFromBytes(bytes));
 }
 
-function normalizePrefix(slug: string): string {
-  return slug
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .replaceAll("-", "_")
-    .toLowerCase();
+function deriveCollectionPrefix(slug: string): string {
+  // Hyphens and underscores are word separators; Payload's formatLabels splits only on hyphens and whitespace.
+  const singular = formatLabels(slug.replaceAll("_", "-")).singular;
+  const words = singular.split(" ");
+  // Acronyms such as "APIKeys" split into single letters, so they cannot be derived reliably.
+  const derivable =
+    singular !== "" &&
+    words.every((word) => /^[A-Za-z]+$/.test(word)) &&
+    !(words.length > 1 && words.some((word) => word.length === 1));
+  if (!derivable) {
+    throw new TypeError(
+      `Collection "${slug}" cannot derive a TypeID prefix from its slug. Set custom.typeId or collections["${slug}"] to an explicit prefix string.`,
+    );
+  }
+  return words.join("_").toLowerCase();
 }
 
 function hasCustomID(fields: Field[]): boolean {
@@ -199,6 +209,39 @@ function withIDOwnership(collection: CollectionConfig, prefix: string): Collecti
   };
 }
 
+function readSetting(value: unknown, owner: string): boolean | string | undefined {
+  if (value === undefined || typeof value === "boolean" || typeof value === "string") {
+    return value;
+  }
+  throw new TypeError(
+    `Invalid TypeID configuration for ${owner}: custom.typeId must be true, false, a prefix string, or undefined.`,
+  );
+}
+
+function assertCurrentKey(custom: Record<string, unknown> | undefined, owner: string): void {
+  if (custom && Object.hasOwn(custom, "typeid")) {
+    throw new TypeError(
+      `${owner} uses the obsolete custom.typeid key; rename it to custom.typeId.`,
+    );
+  }
+}
+
+function validateCollectionPrefix(slug: string, prefix: string): void {
+  if (prefix === "") {
+    throw new TypeError(
+      `Collection "${slug}" resolved to an empty TypeID prefix; provide a non-empty prefix string.`,
+    );
+  }
+  try {
+    validatePrefix(prefix);
+  } catch (error) {
+    throw new TypeError(
+      `Invalid TypeID prefix for collection "${slug}": ${error instanceof Error ? error.message : String(error)} Provide a valid prefix string.`,
+      { cause: error },
+    );
+  }
+}
+
 export function typeId(options: TypeIdOptions = {}): Plugin {
   const plugin: Plugin = (config: Config) => {
     if (typeof options !== "object" || options === null || Array.isArray(options)) {
@@ -217,80 +260,77 @@ export function typeId(options: TypeIdOptions = {}): Plugin {
       (typeof overrides !== "object" || overrides === null || Array.isArray(overrides))
     ) {
       throw new TypeError(
-        "TypeID collections must be a record of collection slugs to prefixes or false.",
+        "TypeID collections must be a record of collection slugs to true, false, or prefix strings.",
       );
+    }
+    for (const [slug, setting] of Object.entries(overrides ?? {})) {
+      if (typeof setting !== "boolean" && typeof setting !== "string") {
+        throw new TypeError(
+          `TypeID collections["${slug}"] must be true, false, or a prefix string.`,
+        );
+      }
     }
 
     const collections = config.collections ?? [];
     const collectionSlugs = new Set(collections.map(({ slug }) => slug));
-    const resolved = new Map<string, string>();
-    const prefixes = new Map<string, string>();
-    for (const global of config.globals ?? []) {
-      const typeIdOption = global.custom?.typeid;
-      if (typeIdOption !== undefined && typeIdOption !== false) {
-        throw new TypeError(
-          `Global "${global.slug}" cannot use a TypeID prefix because Payload Globals do not expose configurable document IDs.`,
-        );
-      }
-    }
-    for (const [slug, prefix] of Object.entries(overrides ?? {})) {
+    for (const slug of Object.keys(overrides ?? {})) {
       if (!collectionSlugs.has(slug)) {
-        throw new TypeError(`TypeID override references unknown collection "${slug}".`);
-      }
-      if (prefix !== false && typeof prefix !== "string") {
-        throw new TypeError(`TypeID override for "${slug}" must be a prefix string or false.`);
+        throw new TypeError(`TypeID collections references unknown collection "${slug}".`);
       }
     }
 
-    for (const collection of collections) {
-      const modelTypeId = collection.custom?.typeid;
-      if (modelTypeId !== undefined && modelTypeId !== false && typeof modelTypeId !== "string") {
+    for (const global of config.globals ?? []) {
+      assertCurrentKey(global.custom, `Global "${global.slug}"`);
+      const setting = readSetting(global.custom?.typeId, `Global "${global.slug}"`);
+      if (setting !== undefined && setting !== false) {
         throw new TypeError(
-          `Invalid TypeID configuration for collection "${collection.slug}": custom.typeid must be a prefix string, false, or undefined.`,
+          `Global "${global.slug}" cannot use custom.typeId ${JSON.stringify(setting)} because Payload Globals do not expose configurable document IDs. Use false or omit custom.typeId.`,
         );
       }
-      const centralTypeId =
+    }
+
+    // Resolve opt-in first so shadowed central settings never reach prefix validation.
+    const managed: Array<{ collection: CollectionConfig; setting: true | string }> = [];
+    for (const collection of collections) {
+      assertCurrentKey(collection.custom, `Collection "${collection.slug}"`);
+      const modelSetting = readSetting(
+        collection.custom?.typeId,
+        `collection "${collection.slug}"`,
+      );
+      const centralSetting =
         overrides && Object.hasOwn(overrides, collection.slug)
           ? overrides[collection.slug]
           : undefined;
-      const effectiveTypeId = modelTypeId !== undefined ? modelTypeId : centralTypeId;
-      if (effectiveTypeId === false) continue;
-      const prefix =
-        typeof effectiveTypeId === "string" ? effectiveTypeId : normalizePrefix(collection.slug);
-      try {
-        validatePrefix(prefix);
-      } catch (error) {
-        throw new TypeError(
-          `Invalid TypeID prefix for collection "${collection.slug}": ${error instanceof Error ? error.message : String(error)} Provide a valid collections["${collection.slug}"] override or disable this collection.`,
-          { cause: error },
-        );
-      }
-      if (!prefix) {
-        throw new TypeError(
-          `Collection "${collection.slug}" resolved to an empty TypeID prefix; provide an override.`,
-        );
-      }
+      const setting = modelSetting ?? centralSetting;
+      if (setting === undefined || setting === false) continue;
+      managed.push({ collection, setting });
+    }
+
+    const prefixes = new Map<string, string>();
+    const replacements = new Map<string, CollectionConfig>();
+    for (const { collection, setting } of managed) {
+      const prefix = setting === true ? deriveCollectionPrefix(collection.slug) : setting;
+      validateCollectionPrefix(collection.slug, prefix);
+
       const existing = prefixes.get(prefix);
       if (existing) {
         throw new TypeError(
-          `Collections "${existing}" and "${collection.slug}" resolve to duplicate TypeID prefix "${prefix}". Provide distinct overrides or disable one collection.`,
+          `Collections "${existing}" and "${collection.slug}" resolve to duplicate TypeID prefix "${prefix}". Set an explicit prefix on one of them with custom.typeId or collections.`,
         );
       }
       prefixes.set(prefix, collection.slug);
-      resolved.set(collection.slug, prefix);
+
       if (hasCustomID(collection.fields)) {
         throw new TypeError(
-          `Collection "${collection.slug}" already has a collection-level field named "id". Set collections["${collection.slug}"] = false or rename that field before enabling TypeID.`,
+          `Collection "${collection.slug}" already has a collection-level field named "id". Set custom.typeId = false or rename that field before enabling TypeID.`,
         );
       }
+      replacements.set(collection.slug, withIDOwnership(collection, prefix));
     }
 
     return {
       ...config,
-      collections: collections.map((collection) => {
-        const prefix = resolved.get(collection.slug);
-        return prefix ? withIDOwnership(collection, prefix) : collection;
-      }),
+      collections: collections.map((collection) => replacements.get(collection.slug) ?? collection),
     };
   };
 
