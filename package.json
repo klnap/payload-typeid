@@ -1,9 +1,9 @@
 {
-  "name": "@klnap/package-name",
+  "name": "@klnap/payload-typeid",
   "version": "0.1.0",
-  "description": "Replace this description with the purpose of your package.",
+  "description": "Type-prefixed UUIDv7 primary keys for Payload CMS.",
   "type": "module",
-  "private": true,
+  "private": false,
   "sideEffects": false,
   "exports": {
     ".": {
@@ -24,18 +24,20 @@
     "node": ">=22.14.0"
   },
   "packageManager": "bun@1.4.5",
+  "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/klnap/npm-package-template.git"
+    "url": "git+https://github.com/klnap/payload-typeid.git"
   },
-  "homepage": "https://github.com/klnap/npm-package-template#readme",
+  "homepage": "https://github.com/klnap/payload-typeid#readme",
   "bugs": {
-    "url": "https://github.com/klnap/npm-package-template/issues"
+    "url": "https://github.com/klnap/payload-typeid/issues"
   },
-  "license": "MIT",
   "keywords": [
     "typescript",
-    "library"
+    "payload",
+    "typeid",
+    "uuidv7"
   ],
   "publishConfig": {
     "access": "public",
@@ -48,19 +50,25 @@
     "format:write": "biome format --write .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test",
+    "test:postgres": "PAYLOAD_DB_PUSH=true PAYLOAD_FORCE_DRIZZLE_PUSH=true bun test --timeout 30000 ./tests/postgres.integration.ts",
     "verify:package": "publint --strict && attw --profile esm-only --pack .",
-    "check": "bun run format && bun run lint && bun run typecheck && bun test && bun run build && bun run verify:package",
+    "check": "bun run format && bun run lint && bun run typecheck && bun run build && bun test && bun run verify:package",
     "prepublishOnly": "node -e \"if (require('./package.json').private) throw new Error('This package is private and cannot be published')\"",
     "changeset": "changeset",
     "changeset:version": "changeset version",
     "changeset:version-check": "bun run changeset:version && bun run check"
   },
+  "peerDependencies": {
+    "payload": "^3.1.1"
+  },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
     "@biomejs/biome": "2.6.8",
     "@changesets/cli": "3.0.3",
+    "@payloadcms/db-postgres": "3.94.2",
     "@types/bun": "1.4.5",
     "npm": "12.2.3",
+    "payload": "3.94.2",
     "publint": "0.3.25",
     "typescript": "7.0.2"
   }
