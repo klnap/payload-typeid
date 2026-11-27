@@ -273,7 +273,9 @@ jobs:
           if (!integrity) throw new Error(`npm has no integrity for ${spec}.`);
           const attestations = JSON.parse(execFileSync("npm", ["view", spec, "dist.attestations", "--json"], { encoding: "utf8" }));
           if (!attestations) throw new Error(`npm has no provenance attestations for ${spec}.`);
-          const distTags = JSON.parse(execFileSync("npm", ["view", pkg.name, "dist-tags", "--json"], { encoding: "utf8" }));
+          // npm 12 wraps `view <pkg> dist-tags` output in an array; npm 11 returns the object.
+          const distTagsOutput = JSON.parse(execFileSync("npm", ["view", pkg.name, "dist-tags", "--json"], { encoding: "utf8" }));
+          const distTags = Array.isArray(distTagsOutput) ? distTagsOutput[0] : distTagsOutput;
           if (distTags.latest !== pkg.version) throw new Error(`The latest dist-tag points to ${distTags.latest}, not ${pkg.version}.`);
           const verifyDir = mkdtempSync(path.join(os.tmpdir(), "npm-release-verify-"));
           execFileSync("npm", ["install", "--prefix", verifyDir, "--ignore-scripts", "--no-audit", "--no-fund", spec], { stdio: "inherit" });
