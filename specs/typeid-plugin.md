@@ -100,6 +100,8 @@ No custom identifier fields, UUID mapping table, database extension or type, ada
 - On each Payload start, the plugin installs idempotent SQL for every managed table: a `CHECK` on `id` (prefix, 26 Base32 characters, first character `0`–`7`), a `BEFORE INSERT OR UPDATE` trigger that generates an ID when `id` is NULL, and a trigger branch that rejects changes to `id`.
 - `payload_typeid_encode(hex)` and `payload_typeid_uuid_v7_hex()` implement the same encoding and UUIDv7 layout as `generateTypeId`. Tests assert that the SQL encoder and `fromUUID` agree.
 - Installation runs in `onInit` through the adapter's `pool`. The whole script is one query, so a failure installs nothing. Other adapters log a warning and keep application-level rules only.
+- Objects are qualified with the adapter's `schemaName`; without one they are unqualified, matching Payload's tables. Function bodies call each other with the same qualification.
+- DDL runs only for missing or differing objects, compared against `pg_proc.prosrc`, `pg_get_constraintdef`, and `pg_get_triggerdef`.
 - Existing rows must match the `CHECK`; otherwise startup fails before any guard is installed.
 - Scope: triggers and CHECKs cover managed main tables. Versions and join tables reference those IDs through foreign keys; the integration suite asserts both directions.
 - Not covered: superuser actions, disabled triggers, `DROP`/`TRUNCATE`, backup restores, and non-PostgreSQL adapters.

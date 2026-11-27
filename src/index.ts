@@ -18,10 +18,29 @@ interface TypeIdTableGuard {
 const identifierPattern = /^[a-z_][a-z0-9_]*$/;
 const prefixSafePattern = /^[a-z]([a-z_]{0,61}[a-z])?$/;
 
+// Payload's Postgres table name for a collection slug: camelCase and hyphens become underscores.
+function tableNameForSlug(slug: string): string {
+  return slug
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .replace(/([a-z\d])([A-Z])/g, "$1_$2")
+    .replace(/[-\s]+/g, "_")
+    .toLowerCase();
+}
+
+// Objects are qualified with the adapter's schema; without one they stay unqualified, like Payload's tables.
+function qualifier(schema: string | undefined): (name: string) => string {
+  return (name) => (schema ? `"${schema}"."${name}"` : `"${name}"`);
+}
+
 // Mirrors encodeUuid/decodeSuffix: a 128-bit value as 26 Base32 characters, most significant first.
-const encodeFunction = `
-CREATE OR REPLACE FUNCTION payload_typeid_encode(hex text) RETURNS text
-LANGUAGE plpgsql IMMUTABLE AS $$
+function functionSpecs(q: (name: string) => string) {
+  const specs = [
+    {
+      name: "payload_typeid_encode",
+      args: "hex text",
+      returns: "text",
+      attributes: "LANGUAGE plpgsql IMMUTABLE",
+      body: `
 DECLARE
   value numeric := 0;
   remainder integer;
@@ -37,12 +56,15 @@ BEGIN
     value := (value - remainder) / 32;
   END LOOP;
   RETURN result;
-END $$;`;
-
-// UUIDv7 as described by RFC 9562: 48-bit milliseconds, version 7, RFC variant, random bits.
-const uuidV7Function = `
-CREATE OR REPLACE FUNCTION payload_typeid_uuid_v7_hex() RETURNS text
-LANGUAGE plpgsql VOLATILE AS $$
+END `,
+    },
+    // UUIDv7 as described by RFC 9562: 48-bit milliseconds, version 7, RFC variant, random bits.
+    {
+      name: "payload_typeid_uuid_v7_hex",
+      args: "",
+      returns: "text",
+      attributes: "LANGUAGE plpgsql VOLATILE",
+      body: `
 DECLARE
   millis bigint := floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint;
   random_hex text := replace(gen_random_uuid()::text, '-', '');
@@ -51,12 +73,15 @@ BEGIN
     || '7' || substr(random_hex, 14, 3)
     || to_hex((('x' || substr(random_hex, 17, 1))::bit(4)::int & 3) | 8)
     || substr(random_hex, 18, 15);
-END $$;`;
-
-// Generates an ID when none is supplied, and rejects any change to an existing ID.
-const guardFunction = `
-CREATE OR REPLACE FUNCTION payload_typeid_guard() RETURNS trigger
-LANGUAGE plpgsql AS $$
+END `,
+    },
+    // Generates an ID when none is supplied, and rejects any change to an existing ID.
+    {
+      name: "payload_typeid_guard",
+      args: "",
+      returns: "trigger",
+      attributes: "LANGUAGE plpgsql",
+      body: `
 BEGIN
   IF TG_OP = 'UPDATE' THEN
     IF NEW.id IS DISTINCT FROM OLD.id THEN
@@ -66,40 +91,28 @@ BEGIN
     RETURN NEW;
   END IF;
   IF NEW.id IS NULL THEN
-    NEW.id := TG_ARGV[0] || '_' || payload_typeid_encode(payload_typeid_uuid_v7_hex());
+    NEW.id := TG_ARGV[0] || '_' || ${q("payload_typeid_encode")}(${q("payload_typeid_uuid_v7_hex")}());
   END IF;
   RETURN NEW;
-END $$;`;
-
-// Payload's Postgres table name for a collection slug: camelCase and hyphens become underscores.
-function tableNameForSlug(slug: string): string {
-  return slug
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
-    .replace(/([a-z\d])([A-Z])/g, "$1_$2")
-    .replace(/[-\s]+/g, "_")
-    .toLowerCase();
+END `,
+    },
+  ];
+  return specs.map((spec) => ({
+    // to_regprocedure takes argument types only, not parameter names.
+    signature: `${q(spec.name)}(${spec.args.replace(/^\w+ /, "")})`,
+    body: spec.body,
+    create: `CREATE OR REPLACE FUNCTION ${q(spec.name)}(${spec.args}) RETURNS ${spec.returns} ${spec.attributes} AS $$${spec.body}$$;`,
+  }));
 }
 
-/** SQL that installs the ID functions, a per-table CHECK constraint, and a per-table trigger. */
-function typeIdDatabaseSql(guards: ReadonlyArray<{ table: string; prefix: string }>): string {
-  const statements = [encodeFunction, uuidV7Function, guardFunction];
-  for (const { table, prefix } of guards) {
-    if (!identifierPattern.test(table) || !prefixSafePattern.test(prefix)) {
-      throw new TypeError(`Refusing to guard unsafe table or prefix "${table}" / "${prefix}".`);
-    }
-    const constraint = `payload_typeid_${table}_id_check`;
-    const trigger = `payload_typeid_${table}_guard`;
-    statements.push(
-      `ALTER TABLE "${table}" DROP CONSTRAINT IF EXISTS "${constraint}";`,
-      `ALTER TABLE "${table}" ADD CONSTRAINT "${constraint}" CHECK (id ~ '^${prefix}_[0-7][0-9a-hjkmnp-tv-z]{25}$');`,
-      `DROP TRIGGER IF EXISTS "${trigger}" ON "${table}";`,
-      `CREATE TRIGGER "${trigger}" BEFORE INSERT OR UPDATE ON "${table}" FOR EACH ROW EXECUTE FUNCTION payload_typeid_guard('${prefix}');`,
-    );
-  }
-  return statements.join("\n");
-}
+type PostgresPool = {
+  query(text: string, values?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }>;
+};
 
-type PostgresPool = { query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }> };
+async function catalogValue(pool: PostgresPool, sql: string, values: unknown[]) {
+  const { rows } = await pool.query(sql, values);
+  return rows[0]?.value as string | null | undefined;
+}
 
 /**
  * Installs the database guards on the Postgres adapter. Other adapters get a warning instead:
@@ -109,7 +122,6 @@ async function installTypeIdDatabaseGuards(
   payload: Payload,
   guards: ReadonlyArray<TypeIdTableGuard>,
 ): Promise<void> {
-  if (guards.length === 0) return;
   if (payload.db.name !== "postgres") {
     payload.logger.warn(
       `payload-typeid: database guards are only installed on PostgreSQL; the "${payload.db.name}" adapter keeps application-level rules only.`,
@@ -117,25 +129,79 @@ async function installTypeIdDatabaseGuards(
     return;
   }
 
-  const pool = (payload.db as unknown as { pool: PostgresPool }).pool;
+  const db = payload.db as unknown as {
+    pool: PostgresPool;
+    schemaName?: string;
+    tableNameMap?: Map<string, string>;
+  };
+  const schema = db.schemaName;
+  if (schema !== undefined && !identifierPattern.test(schema)) {
+    throw new TypeError(`payload-typeid: unsupported PostgreSQL schema name "${schema}".`);
+  }
+  const q = qualifier(schema);
+  const pool = db.pool;
+
   const tables = guards.map(({ slug, prefix }) => {
     const defaultName = tableNameForSlug(slug);
-    const tableNameMap = (payload.db as unknown as { tableNameMap?: Map<string, string> })
-      .tableNameMap;
-    const table = tableNameMap?.get(defaultName) ?? defaultName;
-    return { slug, prefix, table };
+    return { slug, prefix, table: db.tableNameMap?.get(defaultName) ?? defaultName };
   });
-
-  for (const { slug, table } of tables) {
-    const { rows } = await pool.query("SELECT to_regclass($1) AS relation", [`"${table}"`]);
-    if (!(rows[0] as { relation: unknown } | undefined)?.relation) {
+  for (const { slug, prefix, table } of tables) {
+    if (!identifierPattern.test(table) || !prefixSafePattern.test(prefix)) {
+      throw new TypeError(
+        `payload-typeid: refusing to guard unsafe table "${table}" or prefix "${prefix}".`,
+      );
+    }
+    const relation = await catalogValue(pool, "SELECT to_regclass($1)::text AS value", [q(table)]);
+    if (!relation) {
       throw new TypeError(
         `payload-typeid: no table "${table}" for collection "${slug}". Set the collection's dbName or rename it before enabling TypeIDs.`,
       );
     }
   }
 
-  await pool.query(typeIdDatabaseSql(tables.map(({ table, prefix }) => ({ table, prefix }))));
+  // Only missing or differing objects are changed, so an up-to-date database needs no DDL and
+  // a role without table-owner rights can still start.
+  const statements: string[] = [];
+  for (const spec of functionSpecs(q)) {
+    const current = await catalogValue(
+      pool,
+      "SELECT prosrc AS value FROM pg_proc WHERE oid = to_regprocedure($1)",
+      [spec.signature],
+    );
+    if (current !== spec.body) statements.push(spec.create);
+  }
+
+  for (const { prefix, table } of tables) {
+    const constraint = `payload_typeid_${table}_id_check`;
+    const trigger = `payload_typeid_${table}_guard`;
+    const constraintDef = await catalogValue(
+      pool,
+      "SELECT pg_get_constraintdef(c.oid) AS value FROM pg_constraint c WHERE c.conrelid = to_regclass($1) AND c.conname = $2",
+      [q(table), constraint],
+    );
+    if (!constraintDef?.includes(`'^${prefix}_[0-7][0-9a-hjkmnp-tv-z]{25}$'`)) {
+      statements.push(
+        `ALTER TABLE ${q(table)} DROP CONSTRAINT IF EXISTS "${constraint}";`,
+        `ALTER TABLE ${q(table)} ADD CONSTRAINT "${constraint}" CHECK (id ~ '^${prefix}_[0-7][0-9a-hjkmnp-tv-z]{25}$');`,
+      );
+    }
+    const triggerDef = await catalogValue(
+      pool,
+      "SELECT pg_get_triggerdef(t.oid) AS value FROM pg_trigger t WHERE t.tgrelid = to_regclass($1) AND t.tgname = $2 AND NOT t.tgisinternal",
+      [q(table), trigger],
+    );
+    if (!triggerDef?.includes(`payload_typeid_guard('${prefix}')`)) {
+      statements.push(
+        `DROP TRIGGER IF EXISTS "${trigger}" ON ${q(table)};`,
+        `CREATE TRIGGER "${trigger}" BEFORE INSERT OR UPDATE ON ${q(table)} FOR EACH ROW EXECUTE FUNCTION ${q("payload_typeid_guard")}('${prefix}');`,
+      );
+    }
+  }
+
+  if (statements.length > 0) {
+    // A multi-statement query runs as one transaction: a failure leaves the previous guards in place.
+    await pool.query(statements.join("\n"));
+  }
 }
 
 export type TypeID<Prefix extends string = string> = string extends Prefix

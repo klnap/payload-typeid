@@ -194,14 +194,15 @@ Notes:
 
 ### Startup requirements
 
-Guard installation runs when Payload starts, as a single SQL script:
+Guard installation runs when Payload starts. It compares each function, constraint, and trigger with its expected definition and runs DDL only for objects that are missing or different. A database that is already up to date needs no DDL, so a runtime role without table-owner rights can still start.
 
-- Each managed table must already exist. The plugin reports a missing table.
-- The database role must be allowed to create functions and triggers and to alter the tables.
+- Each managed table must already exist in the schema Payload uses (see below). The plugin reports a missing table.
+- The first installation, or a plugin upgrade that changes a function body, needs a role that owns the affected functions and tables.
 - Existing rows must satisfy the `CHECK`. If they do not, startup fails and no guard is installed. Migrate those rows first.
+- Guards are created in the schema set by `schemaName` in the Payload database adapter. Without `schemaName`, objects are unqualified and resolve through `search_path`, as Payload's tables do.
 - The functions use `gen_random_uuid()`, built into PostgreSQL 13 and later.
 
-These requirements follow from the implementation. They are not covered by a test that changes database privileges or inserts non-matching legacy rows.
+The schema tests (non-default schema with a same-named table in `public`, a restricted runtime role starting on up-to-date guards, and opt-out after activation) run against the development Payload version. They are not part of the Payload 3.1.1 CI job. Manual checks on 3.1.1 confirmed that guards land in the configured schema, but the same test sequence does not complete reliably there in one process.
 
 ### What the guards cannot stop
 
@@ -217,7 +218,7 @@ Enabling TypeIDs on a populated database is a migration, not a configuration cha
 
 To keep a collection on its native IDs, set `custom.typeId: false` before the first start with the plugin.
 
-After the plugin has activated on a database, setting `custom.typeId: false` does not restore column types, convert IDs, rewrite references, or remove guards.
+After the plugin has activated on a database, setting `custom.typeId: false` does not restore column types, convert IDs, rewrite references, or remove guards. The collection keeps generating TypeIDs. Opting out is only a clean change before the first activation.
 
 ## Utilities
 
