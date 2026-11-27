@@ -1,0 +1,67 @@
+{
+  "name": "@klnap/package-name",
+  "version": "0.1.0",
+  "description": "Replace this description with the purpose of your package.",
+  "type": "module",
+  "private": true,
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/index.js",
+    "dist/index.js.map",
+    "dist/index.d.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "packageManager": "bun@1.4.5",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/klnap/npm-package-template.git"
+  },
+  "homepage": "https://github.com/klnap/npm-package-template#readme",
+  "bugs": {
+    "url": "https://github.com/klnap/npm-package-template/issues"
+  },
+  "license": "MIT",
+  "keywords": [
+    "typescript",
+    "library"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "biome lint .",
+    "format": "biome format .",
+    "format:write": "biome format --write .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test",
+    "verify:package": "publint --strict && attw --profile esm-only --pack .",
+    "check": "bun run format && bun run lint && bun run typecheck && bun test && bun run build && bun run verify:package",
+    "prepublishOnly": "node -e \"if (require('./package.json').private) throw new Error('This package is private and cannot be published')\"",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "changeset:version-check": "bun run changeset:version && bun run check"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@biomejs/biome": "2.6.8",
+    "@changesets/cli": "3.0.3",
+    "@types/bun": "1.4.5",
+    "npm": "12.2.3",
+    "publint": "0.3.25",
+    "typescript": "7.0.2"
+  }
+}
