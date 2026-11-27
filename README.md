@@ -1,6 +1,6 @@
 # @klnap/payload-typeid
 
-Use [TypeIDs](https://github.com/jetify-com/typeid/blob/main/spec/README.md) as native Payload document IDs. A TypeID is a readable prefix plus a UUIDv7 in a compact suffix, for example `article_01m8d47saaepfr8kaw7mqdxs1h`. It stays the document's one ID.
+Use [TypeIDs](https://github.com/jetify-com/typeid/blob/main/spec/README.md) as native Payload document IDs. A TypeID is a readable prefix plus a UUIDv7 in a compact suffix, for example `article_01m8d47saaepfr8kaw7mqdxs1h`. It is the document's one ID.
 
 ## Installation
 
@@ -14,39 +14,43 @@ npm install @klnap/payload-typeid
 
 ## Quick start
 
+Registering `typeId()` changes nothing by itself. A collection opts in with `custom.typeId`:
+
 ```ts
 import { buildConfig, type CollectionConfig } from "payload";
 import { typeId } from "@klnap/payload-typeid";
 
 const Articles: CollectionConfig = {
   slug: "articles",
-  custom: { typeid: "article" },
+  custom: { typeId: "article" },
+  fields: [],
+};
+
+const Users: CollectionConfig = {
+  slug: "users",
   fields: [],
 };
 
 export default buildConfig({
-  collections: [Articles],
+  collections: [Articles, Users],
   plugins: [typeId()],
 });
 ```
 
-Documents get IDs such as `article_01m8d47saaepfr8kaw7mqdxs1h`. Register the plugin after plugins that add collections.
+`articles` gets IDs such as `article_01m8d47saaepfr8kaw7mqdxs1h`. `users` keeps its native ID strategy. Register the plugin after plugins that add collections.
 
 ## Configuration
 
-Set the prefix on the collection, or exclude it with `false`:
+`custom.typeId` accepts:
 
-```ts
-export const Users: CollectionConfig = {
-  slug: "users",
-  custom: { typeid: false },
-  fields: [],
-};
-```
+| Value       | Effect                                                                                                |
+| ----------- | ----------------------------------------------------------------------------------------------------- |
+| `"article"` | Manage the collection with this exact prefix.                                                         |
+| `true`      | Derive a singular prefix from the slug: `articles` → `article`, `article-authors` → `article_author`. |
+| `false`     | Keep the native ID strategy.                                                                          |
+| omitted     | Inherit the central option, or keep the native strategy.                                              |
 
-`custom.typeid` takes a prefix string, `false`, or `undefined`. A string manages the collection with that prefix. `false` keeps its native ID strategy. `undefined` inherits the central option, then the default.
-
-The same settings can live in the plugin call:
+Central settings use the same values:
 
 ```ts
 typeId({
@@ -54,9 +58,13 @@ typeId({
 });
 ```
 
-Precedence: **model configuration > central configuration > default**. Without either, the prefix is the collection slug with hyphens replaced by underscores, e.g. `article-categories` becomes `article_categories`.
+**Precedence:** model configuration > central configuration > default (native strategy). A model-level `true` or `false` overrides the central value.
 
-Prefixes must be 1–63 lowercase ASCII letters or underscores, starting and ending with a letter. Invalid prefixes, prefix collisions, unknown central slugs, and collections that already define an `id` field fail at setup.
+Globals accept only `false` or omission. Payload does not expose configurable Global document IDs.
+
+Prefixes must be 1–63 lowercase ASCII letters or underscores, starting and ending with a letter. Derived prefixes are rejected when the slug is ambiguous, for example `APIKeys` or `users-2fa`; set an explicit prefix there. Singularization is only a convenience: `data` becomes `datum` and `dice` becomes `die`, so prefer explicit prefixes for such names.
+
+The obsolete `custom.typeid` key throws during setup. Rename it to `custom.typeId`.
 
 ## Using IDs
 
@@ -69,7 +77,7 @@ const article = await payload.create({
 await payload.findByID({ collection: "articles", id: article.id });
 ```
 
-Relationships use the native ID as usual: `relationTo: "categories"` and pass the related document's `id`.
+Relationships use the native ID: set `relationTo` as usual and pass the related document's `id`.
 
 ## Utilities
 
@@ -106,9 +114,9 @@ toUUID(fromUUID("article", uuid)) === uuid; // true
 
 ## Limits
 
-- Existing IDs and relationship values are not migrated. Migrate them before enabling the plugin on existing data.
+- Enabling TypeIDs on a collection with existing records changes its ID and relationship column types. Migrate the data before enabling it.
 - Direct database writes bypass Payload hooks.
-- Globals keep Payload's adapter ID strategy. A Global prefix is rejected; `custom.typeid: false` is a no-op.
+- Existing IDs and relationship values are not migrated automatically.
 
 ## Compatibility
 
