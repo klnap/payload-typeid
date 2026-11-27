@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { randomBytes } from "node:crypto";
+import { installTypeIdDatabaseGuards, type TypeIdTableGuard } from "./database.js";
 import {
   type CollectionConfig,
   type Config,
@@ -309,6 +310,7 @@ export function typeId(options: TypeIdOptions = {}): Plugin {
 
     const prefixes = new Map<string, string>();
     const replacements = new Map<string, CollectionConfig>();
+    const guards: TypeIdTableGuard[] = [];
     for (const { collection, setting } of managed) {
       const prefix = setting === true ? deriveCollectionPrefix(collection.slug) : setting;
       validateCollectionPrefix(collection.slug, prefix);
@@ -327,11 +329,18 @@ export function typeId(options: TypeIdOptions = {}): Plugin {
         );
       }
       replacements.set(collection.slug, withIDOwnership(collection, prefix));
+      guards.push({ slug: collection.slug, prefix });
     }
 
+    const onInit = config.onInit;
     return {
       ...config,
       collections: collections.map((collection) => replacements.get(collection.slug) ?? collection),
+      // Database guards run after Payload has created its tables, so the CHECK and triggers apply to them.
+      onInit: async (payload) => {
+        await onInit?.(payload);
+        await installTypeIdDatabaseGuards(payload, guards);
+      },
     };
   };
 
