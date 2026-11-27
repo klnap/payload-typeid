@@ -1,55 +1,6 @@
 # @klnap/payload-typeid
 
-Use TypeIDs as native document IDs in Payload CMS.
-
-```ts
-import { buildConfig, type CollectionConfig } from "payload";
-import { typeId } from "@klnap/payload-typeid";
-
-const Articles: CollectionConfig = {
-  slug: "articles",
-  custom: { typeid: "article" },
-  fields: [],
-};
-
-const Authors: CollectionConfig = {
-  slug: "authors",
-  custom: { typeid: "author" },
-  fields: [],
-};
-
-const Categories: CollectionConfig = {
-  slug: "categories",
-  custom: { typeid: "category" },
-  fields: [],
-};
-
-export default buildConfig({
-  collections: [Articles, Authors, Categories],
-  plugins: [typeId()],
-});
-```
-
-These explicit singular prefixes produce IDs such as:
-
-```text
-article_01m8d47saaepfr8kaw7mqdxs1h
-author_01m8d47sabf8ca5x5s9smzr0qz
-category_01m8d47sabeyjvrxppjadz5h5w
-```
-
-## Why?
-
-TypeIDs make record types easier to recognize in logs, URLs, and API responses. They encode a UUIDv7 in a compact Base32 suffix and add a readable prefix. A TypeID remains the document's one native Payload ID; it does not add a second public identifier.
-
-## Features
-
-- Use TypeIDs as native Payload collection document IDs.
-- Choose semantic prefixes on each collection or centrally in plugin options.
-- Exclude collections while preserving their configured ID strategy.
-- Generate new UUIDv7 IDs on document creation and duplication.
-- Generate, validate, parse, and convert TypeIDs with the exported utilities.
-- Add no third-party runtime dependencies.
+Use [TypeIDs](https://github.com/jetify-com/typeid/blob/main/spec/README.md) as native Payload document IDs. A TypeID is a readable prefix plus a UUIDv7 in a compact suffix, for example `article_01m8d47saaepfr8kaw7mqdxs1h`. It stays the document's one ID.
 
 ## Installation
 
@@ -61,11 +12,53 @@ bun add @klnap/payload-typeid
 npm install @klnap/payload-typeid
 ```
 
-## Usage
+## Quick start
 
-### Create and find a document
+```ts
+import { buildConfig, type CollectionConfig } from "payload";
+import { typeId } from "@klnap/payload-typeid";
 
-Payload uses the generated TypeID directly for ordinary Local API operations:
+const Articles: CollectionConfig = {
+  slug: "articles",
+  custom: { typeid: "article" },
+  fields: [],
+};
+
+export default buildConfig({
+  collections: [Articles],
+  plugins: [typeId()],
+});
+```
+
+Documents get IDs such as `article_01m8d47saaepfr8kaw7mqdxs1h`. Register the plugin after plugins that add collections.
+
+## Configuration
+
+Set the prefix on the collection, or exclude it with `false`:
+
+```ts
+export const Users: CollectionConfig = {
+  slug: "users",
+  custom: { typeid: false },
+  fields: [],
+};
+```
+
+`custom.typeid` takes a prefix string, `false`, or `undefined`. A string manages the collection with that prefix. `false` keeps its native ID strategy. `undefined` inherits the central option, then the default.
+
+The same settings can live in the plugin call:
+
+```ts
+typeId({
+  collections: { articles: "article", users: false },
+});
+```
+
+Precedence: **model configuration > central configuration > default**. Without either, the prefix is the collection slug with hyphens replaced by underscores, e.g. `article-categories` becomes `article_categories`.
+
+Prefixes must be 1–63 lowercase ASCII letters or underscores, starting and ending with a letter. Invalid prefixes, prefix collisions, unknown central slugs, and collections that already define an `id` field fail at setup.
+
+## Using IDs
 
 ```ts
 const article = await payload.create({
@@ -73,42 +66,12 @@ const article = await payload.create({
   data: { title: "Getting started with Payload CMS" },
 });
 
-const found = await payload.findByID({
-  collection: "articles",
-  id: article.id,
-});
+await payload.findByID({ collection: "articles", id: article.id });
 ```
 
-### Use a relationship
+Relationships use the native ID as usual: `relationTo: "categories"` and pass the related document's `id`.
 
-Define a normal Payload relationship:
-
-```ts
-{
-  name: "category",
-  type: "relationship",
-  relationTo: "categories",
-}
-```
-
-Pass the related document's native ID when creating an article:
-
-```ts
-const category = await payload.create({
-  collection: "categories",
-  data: { title: "Development" },
-});
-
-await payload.create({
-  collection: "articles",
-  data: {
-    title: "Understanding TypeIDs",
-    category: category.id,
-  },
-});
-```
-
-### Generate, validate, and convert IDs
+## Utilities
 
 ```ts
 import {
@@ -121,91 +84,40 @@ import {
 } from "@klnap/payload-typeid";
 
 const id: TypeID<"article"> = generateTypeId("article");
-isTypeId(id); // true
 isTypeId(id, "article"); // true
 isTypeId(id, "category"); // false
 
 const uuid = "0188bac7-4afa-78aa-bc3b-bd1eef28d881";
-const converted = fromUUID("article", uuid);
-parseTypeId(converted).uuid === uuid; // true
-toUUID(converted) === uuid; // true
+toUUID(fromUUID("article", uuid)) === uuid; // true
 ```
 
-| Export                             | Description                                         |
-| ---------------------------------- | --------------------------------------------------- |
-| `typeId(options?)`                 | Creates the Payload plugin.                         |
-| `generateTypeId(prefix)`           | Generates a UUIDv7 TypeID.                          |
-| `isTypeId(value, expectedPrefix?)` | Validates a TypeID and optionally its prefix.       |
-| `parseTypeId(value)`               | Returns the prefix and canonical UUID.              |
-| `fromUUID(prefix, uuid)`           | Encodes a canonical UUID as a TypeID.               |
-| `toUUID(value)`                    | Converts a TypeID to its canonical UUID.            |
-| `TypeID<Prefix>`                   | Compile-time string type constrained by its prefix. |
-| `TypeIdOptions`                    | Options accepted by `typeId()`.                     |
+| Export                             | Description                                   |
+| ---------------------------------- | --------------------------------------------- |
+| `typeId(options?)`                 | Creates the Payload plugin.                   |
+| `generateTypeId(prefix)`           | Generates a TypeID with a new UUIDv7.         |
+| `isTypeId(value, expectedPrefix?)` | Validates a TypeID and optionally its prefix. |
+| `parseTypeId(value)`               | Returns the prefix and canonical UUID.        |
+| `fromUUID(prefix, uuid)`           | Encodes a canonical UUID as a TypeID.         |
+| `toUUID(value)`                    | Converts a TypeID to its canonical UUID.      |
+| `TypeID<Prefix>`                   | Compile-time type. Not runtime validation.    |
+| `TypeIdOptions`                    | Options accepted by `typeId()`.               |
 
-Codec utilities accept empty prefixes and UUIDs of any version. Invalid inputs make `parseTypeId`, `fromUUID`, and `toUUID` throw `TypeError`; `isTypeId` returns `false`. `TypeID<Prefix>` is a compile-time aid, not runtime validation. Payload-generated document types expose `id: string`.
+`parseTypeId`, `fromUUID`, and `toUUID` throw `TypeError` on invalid input. `isTypeId` returns `false`.
 
-## Configuration
+## Limits
 
-Set a semantic prefix or exclude a collection in its own Payload config:
-
-```ts
-import type { CollectionConfig } from "payload";
-
-export const Articles: CollectionConfig = {
-  slug: "articles",
-  custom: { typeid: "article" },
-  fields: [],
-};
-
-export const Users: CollectionConfig = {
-  slug: "users",
-  custom: { typeid: false },
-  fields: [],
-};
-```
-
-`custom.typeid` accepts a prefix string, `false`, or `undefined`. A string manages the collection with that prefix. `false` leaves its native ID strategy unchanged. Omitted or `undefined` values inherit the central plugin option, then the default.
-
-Central settings are an alternative:
-
-```ts
-typeId({
-  collections: {
-    articles: "article",
-    authors: "author",
-    users: false,
-  },
-});
-```
-
-Precedence is **model configuration > central configuration > defaults**. Model settings override central prefixes and exclusions. Unspecified collections use the central setting when present; otherwise, the plugin derives a prefix from the unchanged collection slug.
-
-Automatic prefixes lowercase the slug, replace hyphens with underscores, and separate camel-case and acronym boundaries. They do not singularize: `articles` becomes `articles`, and `article-categories` becomes `article_categories`. Singular prefixes such as `article` are explicit conventions, not a TypeID requirement.
-
-Managed prefixes must be unique, non-empty, and 1–63 lowercase ASCII letters or underscores. They must start and end with a letter. Invalid prefixes, effective collisions, unknown central collection slugs, and existing collection-level `id` fields fail during plugin setup.
-
-Register the plugin after plugins that add collections. Managed IDs use Payload's top-level text `id` field and remain immutable through Payload operations. Nested data fields named `id` are separate. Existing collection IDs and relationship values are not migrated; migrate them before enabling the plugin on existing data. Direct database writes bypass Payload hooks.
-
-Globals remain under Payload's adapter ID strategy. Payload addresses Global operations by slug and does not expose a configurable native Global document ID. `custom.typeid: false` is accepted as a no-op; a Global prefix is rejected.
+- Existing IDs and relationship values are not migrated. Migrate them before enabling the plugin on existing data.
+- Direct database writes bypass Payload hooks.
+- Globals keep Payload's adapter ID strategy. A Global prefix is rejected; `custom.typeid: false` is a no-op.
 
 ## Compatibility
 
-| Area              | Support                                                                                                                                                   |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Payload CMS       | Peer range `^3.1.1`; PostgreSQL integration tested with `3.1.1`, `3.68.4`, `3.71.0`, and `3.94.2`. Payload 4 is unverified.                               |
-| Database adapters | PostgreSQL 16 tested with the default serial strategy and explicit `idType: "uuid"`. Other adapters are unverified.                                       |
-| Node.js           | This package requires `>=22.14.0`. Follow the selected Payload release's engine range; Payload `3.94.2` requires `^22.23.5 \|\| ^24.22.3 \|\| >=26.13.1`. |
-| Module format     | ESM only.                                                                                                                                                 |
-
-Use the latest stable Payload 3.x for security fixes. The peer range describes compatibility, not a recommendation to run older releases.
-
-## Documentation
-
-- [Payload plugins](https://payloadcms.com/docs/plugins/overview)
-- [Payload custom ID fields](https://payloadcms.com/docs/fields/default-fields#custom-id-fields)
-- [Payload Globals](https://payloadcms.com/docs/configuration/globals)
-- [TypeID specification](https://github.com/jetify-com/typeid/blob/main/spec/README.md)
-- [UUIDv7 in RFC 9562](https://www.rfc-editor.org/rfc/rfc9562.html#section-5.7)
+| Area          | Support                                                                                                                       |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Payload CMS   | Peer range `^3.1.1`. PostgreSQL integration tests pass on `3.1.1`, `3.68.4`, `3.71.0`, and `3.94.2`. Payload 4 is unverified. |
+| Database      | PostgreSQL 16, with the default serial strategy and `idType: "uuid"`. Other adapters are unverified.                          |
+| Node.js       | `>=22.14.0`. Payload's own engine range applies too; Payload `3.94.2` requires `^22.23.5 \|\| ^24.22.3 \|\| >=26.13.1`.       |
+| Module format | ESM only.                                                                                                                     |
 
 ## License
 
