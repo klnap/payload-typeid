@@ -289,7 +289,8 @@ export function typeId(options: TypeIdOptions = {}): Plugin {
       }
     }
 
-    // Resolve opt-in first so shadowed central settings never reach prefix validation.
+    // Resolve opt-out first so shadowed central settings never reach prefix validation.
+    // Precedence: model custom.typeId > central collections entry > default (derived prefix).
     const managed: Array<{ collection: CollectionConfig; setting: true | string }> = [];
     for (const collection of collections) {
       assertCurrentKey(collection.custom, `Collection "${collection.slug}"`);
@@ -301,8 +302,8 @@ export function typeId(options: TypeIdOptions = {}): Plugin {
         overrides && Object.hasOwn(overrides, collection.slug)
           ? overrides[collection.slug]
           : undefined;
-      const setting = modelSetting ?? centralSetting;
-      if (setting === undefined || setting === false) continue;
+      const setting = modelSetting ?? centralSetting ?? true;
+      if (setting === false) continue;
       managed.push({ collection, setting });
     }
 

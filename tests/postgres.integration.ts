@@ -157,7 +157,7 @@ test("uses native TypeIDs with Payload and PostgreSQL adapter ID types", async (
   expect(payload.collections["plugin-documents"].customIDType).toBe("text");
   expect(payload.collections.users.customIDType).toBeUndefined();
   expect(payload.collections.media.customIDType).toBeUndefined();
-  expect(payload.collections.notes.customIDType).toBeUndefined();
+  expect(payload.collections.notes.customIDType).toBe("text");
   expect(payload.db.defaultIDType).toBe(postgresIDType === "uuid" ? "text" : "number");
   expect(
     payload.collections.articles.config.fields.filter(
@@ -197,11 +197,11 @@ test("uses native TypeIDs with Payload and PostgreSQL adapter ID types", async (
   });
   const note = await payload.create({
     collection: "notes",
-    data: { body: "Unspecified collection" },
+    data: { body: "Default-managed collection" },
     overrideAccess: true,
   });
   expect(isTypeId(pluginDocument.id, "document")).toBe(true);
-  expect(isTypeId(note.id)).toBe(false);
+  expect(isTypeId(note.id, "note")).toBe(true);
 
   const article = await payload.create({
     collection: "articles",
