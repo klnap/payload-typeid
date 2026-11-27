@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+### Patch Changes
+
+- 218a64b: Document and test that relationship and version rows reference managed TypeIDs through foreign keys, and state what the database guards cannot stop.
+
 ## 0.3.0
 
 ### Minor Changes
