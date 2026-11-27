@@ -1,6 +1,6 @@
 # @klnap/payload-typeid
 
-Use [TypeIDs](https://github.com/jetify-com/typeid/blob/main/spec/README.md) as native Payload document IDs. A TypeID is a readable prefix plus a UUIDv7 in a compact suffix, for example `article_01m8d47saaepfr8kaw7mqdxs1h`. It is the document's one ID.
+Use readable, type-prefixed IDs as native Payload document IDs. An ID is a prefix plus a UUIDv7 in a compact suffix, for example `article_01m8d47saaepfr8kaw7mqdxs1h`. It is the document's one ID. The package implements the encoding itself and has no runtime dependencies.
 
 ## Installation
 

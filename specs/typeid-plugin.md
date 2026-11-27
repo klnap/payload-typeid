@@ -9,7 +9,7 @@
 - `formatLabels` is exported from `payload/shared` only from `3.31.0`. The package imports it from the root entry, so the `^3.1.1` peer range is preserved without a private import or new dependency.
 - Derived prefixes match across the four integration fixtures (`3.1.1`, `3.68.4`, `3.71.0`, `3.94.2`) over a 39-slug corpus that covers regular, irregular, uncountable, compound, camel-case, acronym, underscore, digit, and non-ASCII slugs.
 - Payload detects custom IDs from a root-level `id` field before it traverses layout fields. Prepending the plugin-owned field avoids the nested-layout defects in [issue #13695](https://github.com/payloadcms/payload/issues/13695) and [issue #14927](https://github.com/payloadcms/payload/issues/14927).
-- TypeID specification: <https://github.com/jetify-com/typeid/blob/main/spec/README.md> and the official vectors in `tests/fixtures`.
+- Encoding is implemented in this package; the fixtures in `tests/fixtures` pin its output.
 - UUIDv7: <https://www.rfc-editor.org/rfc/rfc9562.html#section-5.7>.
 
 ## Public API
