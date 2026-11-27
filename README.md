@@ -245,7 +245,22 @@ Choose one before you deploy:
 1. **Migrate.** Back up the database. Write a migration that assigns a TypeID to each existing document and rewrites relationship values to match. Deploy it together with the plugin.
 2. **Opt out.** Set `custom.typeId: false` on each existing collection you do not want to change. Only new collections get TypeIDs.
 
-Direct database writes bypass Payload hooks, so they also bypass the ID rules.
+The database guards below run on writes that bypass Payload hooks. Existing data that does not match them blocks startup until it is migrated.
+
+## Database guards (PostgreSQL)
+
+Payload hooks do not run for raw SQL, so the plugin installs the ID rules in the database as well. For each managed table, on every Payload start:
+
+- **Generation:** an `INSERT` without `id` receives a TypeID with the table's prefix. The SQL encoder matches `generateTypeId`, and the test suite checks that the two agree.
+- **Validation:** a `CHECK` constraint rejects any `id` that is not `prefix_` followed by 26 Base32 characters, with the first character in `0`–`7`. A wrong prefix is rejected too.
+- **Immutability:** a trigger rejects any `UPDATE` that changes `id`. Other columns can still be updated.
+
+The guards are idempotent and survive a repeated `push`; the test suite runs twice against the same database to check this. Limits:
+
+- **PostgreSQL only.** Other adapters log a warning at startup and keep only application-level rules.
+- **Existing data.** The `CHECK` applies to all rows. If a managed table already holds IDs that do not match, startup fails and no guard is installed. Migrate those rows first (see [Enabling on existing data](#enabling-on-existing-data)).
+- **Scope.** Versions tables (`_<table>_v`) and relationship join tables are not guarded; their IDs belong to Payload.
+- **Fields.** The guards check only `id`. Other constraints and field rules are not changed.
 
 ## Compatibility
 

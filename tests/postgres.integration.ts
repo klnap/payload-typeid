@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { postgresAdapter } from "@payloadcms/db-postgres";
 import { buildConfig, getPayload, type Plugin } from "payload";
-import { isTypeId, typeId } from "@klnap/payload-typeid";
+import { fromUUID, isTypeId, parseTypeId, typeId } from "@klnap/payload-typeid";
 
 const databaseURL = process.env.PAYLOAD_TYPEID_TEST_DATABASE_URL;
 if (!databaseURL) {
@@ -425,4 +425,53 @@ test("uses native TypeIDs with Payload and PostgreSQL adapter ID types", async (
   expect(indexes.rows.map(({ indexname }) => indexname)).toContain(
     "articles_sections_parent_id_idx",
   );
+});
+
+test("database guards generate, validate, and freeze IDs for raw SQL writes", async () => {
+  if (!payload) throw new Error("payload must be initialized by the first test");
+  const pool = (
+    payload.db as unknown as {
+      pool: {
+        query(text: string, values?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }>;
+      };
+    }
+  ).pool;
+
+  // A raw insert without an ID gets a TypeID with the table's prefix from the trigger.
+  const inserted = await pool.query(
+    `INSERT INTO "notes" ("body") VALUES ('raw write') RETURNING "id"`,
+  );
+  const id = String(inserted.rows[0]?.id);
+  expect(isTypeId(id, "note")).toBe(true);
+  expect(parseTypeId(id).uuid[14]).toBe("7");
+
+  // The SQL encoder matches the TypeScript encoder for the same UUID.
+  const suffix = id.slice("note_".length);
+  const encoded = await pool.query(
+    `SELECT payload_typeid_encode(replace($1, '-', '')) AS "suffix"`,
+    [parseTypeId(id).uuid],
+  );
+  expect(encoded.rows[0]?.suffix).toBe(suffix);
+  expect(String(fromUUID("note", parseTypeId(id).uuid))).toBe(id);
+
+  // A wrong prefix or a malformed suffix is rejected by the CHECK constraint.
+  await expect(
+    pool.query(`INSERT INTO "notes" ("id", "body") VALUES ($1, 'wrong prefix')`, [
+      `article_${suffix}`,
+    ]),
+  ).rejects.toThrow(/payload_typeid_notes_id_check/);
+  await expect(
+    pool.query(
+      `INSERT INTO "notes" ("id", "body") VALUES ('note_9zzzzzzzzzzzzzzzzzzzzzzzzz', 'bad')`,
+    ),
+  ).rejects.toThrow(/payload_typeid_notes_id_check/);
+
+  // Changing an existing ID is rejected by the trigger; ordinary field updates still work.
+  await expect(
+    pool.query(`UPDATE "notes" SET "id" = $1 WHERE "id" = $2`, [
+      `note_${suffix.slice(0, 25)}0`,
+      id,
+    ]),
+  ).rejects.toThrow(/immutable/);
+  await pool.query(`UPDATE "notes" SET "body" = 'updated raw write' WHERE "id" = $1`, [id]);
 });

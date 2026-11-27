@@ -94,3 +94,11 @@
 ## Non-goals
 
 No custom identifier fields, UUID mapping table, database extension or type, adapter patch, migration framework, API middleware, alternate ID strategy, telemetry, caches, Admin UI, global identifier registry, centralized Global configuration, configuration profiles, or additional singularization option.
+
+## Database guards (PostgreSQL)
+
+- On each Payload start, the plugin installs idempotent SQL for every managed table: a `CHECK` on `id` (prefix, 26 Base32 characters, first character `0`–`7`), a `BEFORE INSERT OR UPDATE` trigger that generates an ID when `id` is NULL, and a trigger branch that rejects changes to `id`.
+- `payload_typeid_encode(hex)` and `payload_typeid_uuid_v7_hex()` implement the same encoding and UUIDv7 layout as `generateTypeId`. Tests assert that the SQL encoder and `fromUUID` agree.
+- Installation runs in `onInit` through the adapter's `pool`. The whole script is one query, so a failure installs nothing. Other adapters log a warning and keep application-level rules only.
+- Existing rows must match the `CHECK`; otherwise startup fails before any guard is installed.
+- Scope: managed main tables only. Versions tables and join tables are out of scope.
