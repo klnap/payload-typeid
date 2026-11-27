@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+### Minor Changes
+
+- fde3889: On PostgreSQL, install database guards for managed tables: generate a TypeID for raw SQL inserts without an ID, reject IDs with the wrong prefix or shape, and reject changes to an existing ID. Guards run on every Payload start and do not apply to other adapters.
+- ee07f97: Manage every collection by default. Registering `typeId()` gives each collection a TypeID prefix derived from its slug using Payload's singularization. Set `custom.typeId` to a string to override, or to `false` to opt out. Central `typeId({ collections })` entries apply when a collection omits `custom.typeId`.
+
+  Breaking: this replaces the explicit opt-in from 0.2.0. Registering the plugin changes the ID type of every collection that does not opt out. Migrate existing data or set `custom.typeId: false` on those collections before upgrading.
+
 ## 0.2.0
 
 ### Minor Changes
