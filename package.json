@@ -1,6 +1,6 @@
 {
   "name": "@klnap/payload-typeid",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Type-prefixed UUIDv7 primary keys for Payload CMS.",
   "type": "module",
   "private": false,
