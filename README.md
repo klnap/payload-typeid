@@ -125,18 +125,26 @@ Globals accept only `false` or omission. Payload does not expose configurable Gl
 2. Pass the result through `formatLabels`, which singularizes the last word.
 3. Join the words with `_` and lowercase the result.
 
+Regular plural nouns derive cleanly:
+
 | Slug              | Derived prefix   |
 | ----------------- | ---------------- |
 | `articles`        | `article`        |
 | `article-authors` | `article_author` |
 | `ArticleAuthors`  | `article_author` |
 | `audit-logs`      | `audit_log`      |
-| `people`          | `person`         |
-| `faqs`            | `faq`            |
-| `data`            | `datum`          |
-| `dice`            | `die`            |
 
-Singularization is a convenience, not a guarantee. The plugin rejects a slug whose label contains characters other than letters, or whose multi-word label contains a single letter, because those cannot be split reliably:
+Irregular or uncountable names do not. Payload's English rules produce prefixes that are correct grammar but unexpected in IDs:
+
+| Slug     | Derived prefix | Recommendation                                               |
+| -------- | -------------- | ------------------------------------------------------------ |
+| `people` | `person`       | Acceptable, but set `"person"` if you prefer explicit names. |
+| `data`   | `datum`        | Set an explicit prefix such as `"dataset"`.                  |
+| `dice`   | `die`          | Set an explicit prefix such as `"roll"`.                     |
+
+Derivation depends on Payload's English rules. A future Payload release could change a derived prefix, and new IDs would follow the new rule. Set explicit prefixes for any collection whose IDs you store, log, or expose.
+
+The plugin rejects a slug whose label contains characters other than letters, or whose multi-word label contains a single letter, because those cannot be split reliably:
 
 | Slug        | Result                                          |
 | ----------- | ----------------------------------------------- |
