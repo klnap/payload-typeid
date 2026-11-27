@@ -124,7 +124,7 @@ const managedPrefix = (collection: { fields: Field[] } | undefined): string | fa
   return parseTypeId(field.defaultValue()).prefix;
 };
 
-test("typeId() without opted-in collections leaves every collection unchanged", () => {
+test("typeId() manages every collection by default with a derived prefix", () => {
   const collections = [
     { slug: "articles", fields: [] },
     { slug: "users", fields: [] },
@@ -133,51 +133,50 @@ test("typeId() without opted-in collections leaves every collection unchanged", 
   const emptyCentral = runPlugin(collections, { collections: {} });
 
   for (const config of [result, emptyCentral]) {
-    expect(config.collections?.map((collection) => idField(collection.fields))).toEqual([
-      undefined,
-      undefined,
+    expect(config.collections?.map((collection) => managedPrefix(collection))).toEqual([
+      "article",
+      "user",
     ]);
-    expect(config.collections?.every(({ fields }) => fields.length === 0)).toBe(true);
   }
 });
 
-test("collections are managed only through model or central opt-in", () => {
+test("model and central settings override the default per collection", () => {
   const result = runPlugin(
     [
-      { slug: "articles", custom: { typeId: true }, fields: [] },
+      { slug: "articles", custom: { typeId: "art" }, fields: [] },
       { slug: "authors", fields: [] },
       { slug: "categories", fields: [] },
       { slug: "pages", fields: [] },
+      { slug: "tags", custom: { typeId: false }, fields: [] },
     ],
-    { collections: { categories: true, pages: false } },
+    { collections: { categories: "category", pages: false, tags: true } },
   );
 
   expect(result.collections?.map((collection) => managedPrefix(collection))).toEqual([
-    "article",
-    false,
+    "art",
+    "author",
     "category",
+    false,
     false,
   ]);
 });
 
-test("unmanaged collections introduced by other plugins keep their ID strategy", () => {
-  const introducedByPlugin = {
+test("a collection opted out with custom.typeId false keeps its ID strategy", () => {
+  const optedOut = {
     slug: "plugin-documents",
+    custom: { typeId: false },
     fields: [{ name: "title", type: "text" }] as unknown as Field[],
   };
-  const result = runPlugin([
-    introducedByPlugin,
-    { slug: "notes", custom: { typeId: true }, fields: [] },
-  ]);
+  const result = runPlugin([optedOut, { slug: "notes", fields: [] }]);
 
-  expect(result.collections?.[0]).toBe(introducedByPlugin);
+  expect(result.collections?.[0]).toBe(optedOut);
   expect(managedPrefix(result.collections?.[1])).toBe("note");
 });
 
 test("resolves every model and central combination before validation", () => {
   const cases: Array<[boolean | string | undefined, boolean | string | undefined, string | false]> =
     [
-      [undefined, undefined, false],
+      [undefined, undefined, "article"],
       [true, undefined, "article"],
       ["post", undefined, "post"],
       [false, undefined, false],
@@ -418,8 +417,8 @@ test("preserves unrelated custom properties", () => {
 
   expect(managedPrefix(result.collections?.[0])).toBe("article");
   expect(result.collections?.[0]?.custom).toBe(custom);
+  expect(managedPrefix(result.collections?.[1])).toBe("author");
   expect(result.collections?.[1]?.custom).toBe(unmanagedCustom);
-  expect(result.collections?.[1]?.fields).toHaveLength(0);
 });
 
 test("handles Globals without configurable IDs", () => {

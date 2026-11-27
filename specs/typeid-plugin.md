@@ -22,19 +22,19 @@
 - `TypeID<Prefix>` is a compile-time template-literal type, not runtime proof.
 - Payload-generated document types keep `id: string`.
 
-## Opt-in and precedence
+## Default-on and precedence
 
-- Registering `typeId()` changes no collection by itself. An empty or omitted `collections` map manages nothing.
+- Registering `typeId()` manages every collection by default. A collection with no setting gets a prefix derived from its slug.
 - Each setting has four states:
 
 | Value                 | Effective result                                                    |
 | --------------------- | ------------------------------------------------------------------- |
-| `true`                | Managed; prefix derived from the collection slug.                   |
+| `true`                | Managed; prefix derived from the collection slug (same as omitted). |
 | prefix string         | Managed; prefix used exactly as written.                            |
-| `false`               | Unmanaged; native ID strategy preserved.                            |
-| omitted / `undefined` | Inherits the central value; unmanaged when no central value exists. |
+| `false`               | Unmanaged; native ID strategy preserved (opt-out).                  |
+| omitted / `undefined` | Inherits the central value; derived prefix when none exists.        |
 
-- Precedence: model `custom.typeId` (including `true` and `false`), then central `collections[slug]`, then unmanaged.
+- Precedence: model `custom.typeId`, then central `collections[slug]`, then the derived default. A model `false` opts out even when the central value names the collection.
 - The resolver runs before prefix derivation and validation. Shadowed central prefixes are not validated, and they cannot cause collisions.
 - Structural errors are still reported for shadowed central values: invalid types and unknown collection slugs.
 
@@ -87,9 +87,9 @@
 
 ## Verification
 
-- Unit tests (`tests/index.test.ts`): official TypeID vectors, round trips, malformed inputs, UUIDv7 bits, concurrent generation, opt-in behavior, the full model/central precedence table, derivation (accepted and rejected slugs, label independence), explicit prefix validation, duplicate and shadowed-collision handling, obsolete key rejection, Global rules, layout-level ID conflicts, nested `id` fields, arrays and blocks, and ID ownership hooks.
+- Unit tests (`tests/index.test.ts`): official TypeID vectors, round trips, malformed inputs, UUIDv7 bits, concurrent generation, default-on behavior, the full model/central precedence table, derivation (accepted and rejected slugs, label independence), explicit prefix validation, duplicate and shadowed-collision handling, obsolete key rejection, Global rules, layout-level ID conflicts, nested `id` fields, arrays and blocks, and ID ownership hooks.
 - PostgreSQL integration (`tests/postgres.integration.ts`): run against `3.1.1`, `3.68.4`, `3.71.0`, and `3.94.2`, with default and UUID strategies. Covers central and model precedence, explicit exclusion, unspecified collections, collections introduced by other plugins, derived and explicit prefixes, managed/unmanaged relationships, uploads, polymorphic relationships, drafts and autosave, localization, duplication, Global rows, and column and foreign-key type checks.
-- CI packed-consumer checks: TypeScript and runtime checks against the packed tarball. The consumer runtime check exercises opt-in and a derived prefix.
+- CI packed-consumer checks: TypeScript and runtime checks against the packed tarball. The consumer runtime check exercises the default derived prefix and an explicit opt-out.
 
 ## Non-goals
 
