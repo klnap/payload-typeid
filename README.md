@@ -259,7 +259,8 @@ The guards are idempotent and survive a repeated `push`; the test suite runs twi
 
 - **PostgreSQL only.** Other adapters log a warning at startup and keep only application-level rules.
 - **Existing data.** The `CHECK` applies to all rows. If a managed table already holds IDs that do not match, startup fails and no guard is installed. Migrate those rows first (see [Enabling on existing data](#enabling-on-existing-data)).
-- **Scope.** Versions tables (`_<table>_v`) and relationship join tables are not guarded; their IDs belong to Payload.
+- **Relations and versions.** Relationship join tables and versions tables are not guarded by triggers. Their references to managed documents are foreign keys to the guarded `id` columns, so a row cannot point at a TypeID that no managed document has. The integration suite checks this for both.
+- **What the database cannot stop.** A superuser can disable triggers or constraints, and `DROP`, `TRUNCATE`, or restoring an old backup bypass every rule. Restrict those privileges to migrations. Other adapters are unguarded (see above).
 - **Fields.** The guards check only `id`. Other constraints and field rules are not changed.
 
 ## Compatibility
