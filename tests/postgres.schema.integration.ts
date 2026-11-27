@@ -95,8 +95,12 @@ async function closePayload(payload: Awaited<ReturnType<typeof getPayload>>) {
   await payload.db.destroy?.();
   const pool = (payload.db as unknown as { pool?: { ending?: boolean; end(): Promise<void> } })
     .pool;
-  // db.destroy() may already have ended the pool; pg-pool rejects a second end().
-  if (pool && !pool.ending) await pool.end();
+  // db.destroy() may already have ended the pool; pg-pool rejects a second end(). On some Payload
+  // versions end() waits for a client that is never released, so the wait is bounded and the
+  // database drop below (WITH FORCE) closes whatever remains.
+  if (pool && !pool.ending) {
+    await Promise.race([pool.end(), new Promise((resolve) => setTimeout(resolve, 5000))]);
+  }
 }
 
 function guardCounts(client: Client, tableSchema: string, table: string) {
