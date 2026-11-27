@@ -178,6 +178,33 @@ Passing `customID` or `data.id` on create throws. Passing `data.id` on update th
 
 Relationships use the native ID. Set `relationTo` as usual and pass the related document's `id`.
 
+### Duplicating documents
+
+`payload.duplicate()` gives the copy a **new** TypeID with the same prefix. The original keeps its ID. The repository's PostgreSQL integration test checks this on every supported Payload version.
+
+```ts
+const copy = await payload.duplicate({ collection: "articles", id: article.id });
+copy.id !== article.id; // true
+copy.id.startsWith("article_"); // true
+```
+
+### Errors
+
+Setup and write errors come from the plugin. Each message names the fix:
+
+| Message (starts with)                                                                 | Cause and fix                                                          |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `... uses the obsolete custom.typeid key`                                             | Rename `custom.typeid` to `custom.typeId`.                             |
+| `Invalid TypeID configuration ... custom.typeId must be true, false, a prefix string` | The value has another type. Use one of the accepted values.            |
+| `Collection "x" cannot derive a TypeID prefix from its slug`                          | The slug is ambiguous. Set `custom.typeId` to an explicit string.      |
+| `Collections "a" and "b" resolve to duplicate TypeID prefix`                          | Two collections share a prefix. Set an explicit prefix on one of them. |
+| `Global "x" cannot use custom.typeId`                                                 | Globals accept only `false` or omission.                               |
+| `TypeID collections references unknown collection`                                    | A central key is not a collection slug in `config.collections`.        |
+| `Collection "x" already has a collection-level field named "id"`                      | Rename that field, or set `custom.typeId: false` on the collection.    |
+| `Collection "x" owns its IDs; omit customID and data.id when creating`                | Remove `customID` and `data.id` from the create call.                  |
+| `Collection "x" IDs are immutable; omit data.id when updating`                        | Remove `data.id` from the update call.                                 |
+| `Register typeId() only once`                                                         | Keep a single `typeId()` entry in `plugins`.                           |
+
 ## Utilities
 
 ```ts
