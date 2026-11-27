@@ -469,7 +469,7 @@ test("database guards generate, validate, and freeze IDs for raw SQL writes", as
   // Changing an existing ID is rejected by the trigger; ordinary field updates still work.
   await expect(
     pool.query(`UPDATE "notes" SET "id" = $1 WHERE "id" = $2`, [
-      `note_${suffix.slice(0, 25)}0`,
+      `note_${suffix.slice(0, 25)}${suffix.endsWith("0") ? "1" : "0"}`,
       id,
     ]),
   ).rejects.toThrow(/immutable/);
