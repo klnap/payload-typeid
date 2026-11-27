@@ -101,4 +101,5 @@ No custom identifier fields, UUID mapping table, database extension or type, ada
 - `payload_typeid_encode(hex)` and `payload_typeid_uuid_v7_hex()` implement the same encoding and UUIDv7 layout as `generateTypeId`. Tests assert that the SQL encoder and `fromUUID` agree.
 - Installation runs in `onInit` through the adapter's `pool`. The whole script is one query, so a failure installs nothing. Other adapters log a warning and keep application-level rules only.
 - Existing rows must match the `CHECK`; otherwise startup fails before any guard is installed.
-- Scope: managed main tables only. Versions tables and join tables are out of scope.
+- Scope: triggers and CHECKs cover managed main tables. Versions and join tables reference those IDs through foreign keys; the integration suite asserts both directions.
+- Not covered: superuser actions, disabled triggers, `DROP`/`TRUNCATE`, backup restores, and non-PostgreSQL adapters.

@@ -475,3 +475,57 @@ test("database guards generate, validate, and freeze IDs for raw SQL writes", as
   ).rejects.toThrow(/immutable/);
   await pool.query(`UPDATE "notes" SET "body" = 'updated raw write' WHERE "id" = $1`, [id]);
 });
+
+test("relationship and version rows cannot reference an ID that is not a managed document", async () => {
+  if (!payload) throw new Error("payload must be initialized by the first test");
+  const pool = (
+    payload.db as unknown as {
+      pool: {
+        query(text: string, values?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }>;
+      };
+    }
+  ).pool;
+
+  const category = await payload.create({
+    collection: "categories",
+    data: { title: "Guarded relations" },
+    overrideAccess: true,
+  });
+  const article = await payload.create({
+    collection: "articles",
+    data: {
+      title: "Guarded relation target",
+      category: category.id,
+      author: (
+        await payload.create({
+          collection: "authors",
+          data: { name: "Guarded author" },
+          overrideAccess: true,
+        })
+      ).id,
+    },
+    overrideAccess: true,
+  });
+
+  // A relationship row to an existing TypeID succeeds; the foreign key is the enforcement point.
+  await pool.query(
+    `INSERT INTO "articles_rels" ("order", "parent_id", "path", "categories_id") VALUES (1, $1, 'related', $2)`,
+    [article.id, category.id],
+  );
+
+  // A relationship row to a TypeID that no managed document has is rejected by the foreign key.
+  await expect(
+    pool.query(
+      `INSERT INTO "articles_rels" ("order", "parent_id", "path", "categories_id") VALUES (2, $1, 'related', $2)`,
+      [article.id, "category_01m8d47saaepfr8kaw7mqdxs1h"],
+    ),
+  ).rejects.toThrow(/articles_rels_categories_fk|foreign key/);
+
+  // A version row cannot point at an ID that is not a managed article.
+  await expect(
+    pool.query(
+      `INSERT INTO "_articles_v" ("parent_id", "created_at", "updated_at") VALUES ($1, now(), now())`,
+      ["article_01m8d47saaepfr8kaw7mqdxs1h"],
+    ),
+  ).rejects.toThrow(/_articles_v_parent_id_articles_id_fk|foreign key/);
+});
