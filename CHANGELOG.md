@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.6
+
+### Patch Changes
+
+- 1020c62: CI only: pin the PostgreSQL service image to the digest used by the local test harness. No runtime change.
+
 ## 0.3.5
 
 ### Patch Changes
