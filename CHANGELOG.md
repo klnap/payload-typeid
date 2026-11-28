@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.5
+
+### Patch Changes
+
+- 0e0935d: Release workflow only: retry the pack artifact download once after a short wait, matching npm-package-template. No runtime change.
+- 43af988: Release workflow only: wait up to three minutes for npm to serve the published version before verifying it. No runtime change.
+
 ## 0.3.4
 
 ### Patch Changes
