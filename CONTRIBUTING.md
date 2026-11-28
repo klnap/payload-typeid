@@ -24,3 +24,12 @@ Before opening a pull request, run:
 bun install --frozen-lockfile
 bun run check
 ```
+
+## PostgreSQL tests
+
+`bun run test:postgres` runs the PostgreSQL integration and schema tests for the `default` ID type. For the `uuid`
+ID type, set `PAYLOAD_TYPEID_TEST_ID_TYPE=uuid`. Without `PAYLOAD_TYPEID_TEST_DATABASE_URL`, the command starts
+`postgres:16-alpine`, pinned to the same digest as CI, in a container with a random loopback port and password,
+then removes it when the command ends. The tests create their own databases and schemas on that server. Docker
+must be running for this command; `bun test` does not need it. If Docker is unavailable, the command exits 1
+with a message instead of skipping the tests. CI sets the URL to its own service container.
