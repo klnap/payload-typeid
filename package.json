@@ -50,7 +50,7 @@
     "format:write": "biome format --write .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test",
-    "test:postgres": "PAYLOAD_DB_PUSH=true PAYLOAD_FORCE_DRIZZLE_PUSH=true bun test --timeout 30000 ./tests/postgres.integration.ts ./tests/postgres.schema.integration.ts",
+    "test:postgres": "PAYLOAD_DB_PUSH=true PAYLOAD_FORCE_DRIZZLE_PUSH=true bun scripts/with-ephemeral-postgres.mjs scripts/ephemeral-postgres.config.mjs -- bun test --timeout 30000 ./tests/postgres.integration.ts ./tests/postgres.schema.integration.ts",
     "verify:package": "publint --strict && attw --profile esm-only --pack .",
     "check": "bun run format && bun run lint && bun run typecheck && bun run build && bun test && bun run verify:package",
     "prepublishOnly": "node -e \"if (require('./package.json').private) throw new Error('This package is private and cannot be published')\"",
